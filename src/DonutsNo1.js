@@ -41,7 +41,7 @@ const DonutsNo1 = (p) => {
         p.rectMode(p.CENTER);
         p.colorMode(p.HSB);
         p.currentColorScheme = p.generateColourScheme(p.random(p.colourModes));
-        p.mainDonut = null;  
+        p.mainDonuts = [];  
         p.subDonuts = [];  
     };
     
@@ -53,10 +53,13 @@ const DonutsNo1 = (p) => {
     p.draw = () => {
         if(p.audioLoaded && p.song.isPlaying() || p.songHasFinished){
             p.background(0, 0, 0);
-            if (p.mainDonut) {
-                p.mainDonut.draw();
-                p.mainDonut.update();
-            }
+            p.mainDonuts.forEach(donut => {
+                donut.draw();
+                donut.update();
+            });
+            if( p.mainDonuts.length > 1){
+                p.background(0, 0, 0, 0.7);
+            } 
             p.subDonuts.forEach(donut => {
                 donut.draw();
                 donut.update();
@@ -181,28 +184,82 @@ const DonutsNo1 = (p) => {
                 return { x, y };
             case 'grid': // Staggered grid pattern
                 const gridIndex = donutIndex;
-                let cols, rows;
                 
                 if (p.isPortraitCanvas()) {
-                    cols = 4;
-                    rows = 5;
+                    // Portrait: Use columns instead of rows
+                    // Define column structure: col 1 = 5, col 2 = 6, col 3 = 5, col 4 = 4
+                    const columnStructure = [5, 6, 5, 4];
+                    const gridTotalDonuts = columnStructure.reduce((sum, count) => sum + count, 0); // 20 total
+                    
+                    // Find which column this donut belongs to
+                    let currentIndex = 0;
+                    let col = 0;
+                    let row = 0;
+                    
+                    for (let i = 0; i < columnStructure.length; i++) {
+                        if (gridIndex < currentIndex + columnStructure[i]) {
+                            col = i;
+                            row = gridIndex - currentIndex;
+                            break;
+                        }
+                        currentIndex += columnStructure[i];
+                    }
+                    
+                    const gridWidth = p.width / columnStructure.length;
+                    const gridHeight = p.height / Math.max(...columnStructure); // Use max rows for spacing
+                    
+                    // Center the donuts in each column based on the number of rows in that column
+                    const columnHeight = columnStructure[col] * gridHeight;
+                    const startY = (p.height - columnHeight) / 2;
+                    
+                    // Add negative offset for second and fourth columns
+                    let staggerOffset = 0;
+                    if (col === 1 || col === 3) { // Second and fourth columns
+                        staggerOffset = -((gridHeight / 4) * 3);
+                    }
+                    
+                    return {
+                        x: col * gridWidth + gridWidth / 2,
+                        y: startY + row * gridHeight + gridHeight / 2 + staggerOffset
+                    };
                 } else {
-                    cols = 5;
-                    rows = 4;
+                    // Landscape: Use rows as before
+                    // Define row structure: row 1 = 5, row 2 = 6, row 3 = 5, row 4 = 4
+                    const rowStructure = [5, 6, 5, 4];
+                    const gridTotalDonuts = rowStructure.reduce((sum, count) => sum + count, 0); // 20 total
+                    
+                    // Find which row this donut belongs to
+                    let currentIndex = 0;
+                    let row = 0;
+                    let col = 0;
+                    
+                    for (let i = 0; i < rowStructure.length; i++) {
+                        if (gridIndex < currentIndex + rowStructure[i]) {
+                            row = i;
+                            col = gridIndex - currentIndex;
+                            break;
+                        }
+                        currentIndex += rowStructure[i];
+                    }
+                    
+                    const gridHeight = p.height / rowStructure.length;
+                    const gridWidth = p.width / Math.max(...rowStructure); // Use max columns for spacing
+                    
+                    // Center the donuts in each row based on the number of columns in that row
+                    const rowWidth = rowStructure[row] * gridWidth;
+                    const startX = (p.width - rowWidth) / 2;
+                    
+                    // Add negative offset for second and fourth rows
+                    let staggerOffset = 0;
+                    if (row === 1 || row === 3) { // Second and fourth rows
+                        staggerOffset = -((gridWidth / 4) * 3);
+                    }
+                    
+                    return {
+                        x: startX + col * gridWidth + gridWidth / 2 + staggerOffset,
+                        y: row * gridHeight + gridHeight / 2
+                    };
                 }
-                
-                const col = gridIndex % cols;
-                const row = Math.floor(gridIndex / cols);
-                const gridWidth = p.width / cols;
-                const gridHeight = p.height / rows;
-                
-                // Add stagger to every other row
-                const staggerOffset = (row % 2) * (gridWidth / 2);
-                
-                return {
-                    x: col * gridWidth + gridWidth / 2 + staggerOffset,
-                    y: row * gridHeight + gridHeight / 2
-                };
             case 'spiral': // Spiral pattern
                 const spiralIndex = donutIndex;
                 const spiralAngle = spiralIndex * 0.5;
@@ -268,30 +325,38 @@ const DonutsNo1 = (p) => {
         let minSize, maxSize;
         let x, y;
 
-        if ([8, 9, 10, 11].includes((currentCue - 1) % 12)) {
+        const cueModulus = (currentCue - 1) % 12;
+        if ([8, 9, 10, 11].includes(cueModulus)) {
+            if (cueModulus === 8) {
+                p.mainDonuts = [];
+            }
             minSize = 0;
-            maxSize = Math.min(p.windowWidth, p.windowHeight) * 1.2;
+            maxSize = Math.max(p.windowWidth, p.windowHeight) * (2 - (0.1 * cueModulus));
             // Always center the donut for these cues
             x = p.width / 2;
             y = p.height / 2;
         } else {
-            p.mainDonut = null;
-            maxSize = Math.min(p.windowWidth, p.windowHeight) / 2;
-            minSize = maxSize / 2;
-            // Randomize position based on orientation
+            p.mainDonuts = [];
+            maxSize = (Math.min(p.windowWidth, p.windowHeight) / 3) * 2;
+            minSize = maxSize / 3;
+            
+            // Alternate between quarter and three quarter positions
             if (p.isPortraitCanvas()) {
                 x = p.width / 2;
-                y = p.random(0, p.height);
+                // Alternate between top quarter and bottom three quarters
+                y = (currentCue % 2 === 1) ? p.height * 0.25 : p.height * 0.75;
             } else {
-                x = p.random(0, p.width);
+                // Alternate between left quarter and right three quarters
+                x = (currentCue % 2 === 1) ? p.width * 0.25 : p.width * 0.75;
                 y = p.height / 2;
             }
         }
 
         // Always create one main donut
-        p.mainDonut = new Donut(p, minSize, maxSize, x, y, 0.5);
-        p.mainDonut.init(duration);
-        p.mainDonut.initDraw(duration);
+        const mainDonut = new Donut(p, minSize, maxSize, x, y, 0.5);
+        mainDonut.init(duration);
+        mainDonut.initDraw(duration);
+        p.mainDonuts.push(mainDonut);
     }
 
     p.executeTrack2 = (note) => {

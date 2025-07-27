@@ -70,7 +70,7 @@ export class Donut {
     }
 
     init(duration) {
-        this.duration = duration * 1000 * 0.85;
+        this.duration = duration * 1000 * 0.8;
         this.birthTime = this.p.song.currentTime() * 1000;
         this.progress = 0;
     }
