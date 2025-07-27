@@ -1,16 +1,16 @@
 import { Midi } from '@tonejs/midi';
+import { Donut } from './classes/Donut.js';
 
-/** 
- * Add your ogg and mid files in the audio director and update these file names
- */
-const audio = new URL("@audio/your-audio-file.ogg", import.meta.url).href;
-const midi = new URL("@audio/your-midi-file.mid", import.meta.url).href;
+const audio = './audio/donuts-no-1.ogg';
+const midi = './audio/donuts-no-1.mid';
 
 const DonutsNo1 = (p) => {
     /** 
      * Core audio properties
      */
     p.song = null;
+    p.PPQ = 3840 * 4;
+    p.bpm = 54;
     p.audioLoaded = false;
     p.songHasFinished = false;
 
@@ -31,33 +31,30 @@ const DonutsNo1 = (p) => {
      * This runs once after preload
      */
     p.setup = () => {
-        // Use Highlight hl-gen.js for deterministic randomness with p5.js
         const seed = p.hashToSeed(hl.tx.hash + hl.tx.tokenId);
         console.log(`Hash: ${hl.tx.hash}, TokenID: ${hl.tx.tokenId}, Seed: ${seed}`);
         p.randomSeed(seed);
         p.createCanvas(p.windowWidth, p.windowHeight);
-        p.canvas = p._renderer.canvas;
         p.canvas.classList.add('p5Canvas--cursor-play');
-        /** 
-         * Add any additional setup code here
-         * Example: p.colorMode(p.HSB);
-         */
+        p.background(0, 0, 0);
+        p.colorMode(p.HSB);
+        p.mainDonut = new Donut(p);  
     };
+    
 
     /** 
      * Main draw loop - This is where your animations happen
      * This runs continuously after setup
      */
     p.draw = () => {
+        p.background(0, 0, 0);
+        p.mainDonut.draw();
+        p.mainDonut.update();
         if(p.audioLoaded && p.song.isPlaying() || p.songHasFinished){
             /** 
              * Add your animation code here
              * This will run while the song is playing or has finished
              */
-        } else {
-            // Show static preview for highlight.xyz
-            p.background(255);
-            hl.token.capturePreview();
         }
     }
 
@@ -74,7 +71,7 @@ const DonutsNo1 = (p) => {
             /** 
              * Example: Schedule different tracks for different visual elements
              */
-            const track1 = result.tracks[0].notes;
+            const track1 = result.tracks[16].notes; // Take Me To Church
             /** 
              * Schedule your cue sets
              * You can add multiple tracks by:
@@ -137,11 +134,12 @@ const DonutsNo1 = (p) => {
      * Add your animation triggers here
      */
     p.executeTrack1 = (note) => {
-        /** 
-         * Add animation code triggered by track 1
-         * Example: trigger based on note properties
-         */
-        const { midi, velocity, currentCue } = note;
+        const { currentCue, durationTicks } = note;
+        const duration = (durationTicks / p.PPQ) * (60 / p.bpm);
+
+        p.mainDonut = new Donut(p);
+        p.mainDonut.init(duration);
+        p.mainDonut.initDraw(duration);
     }
 
     /** 
