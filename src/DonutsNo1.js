@@ -215,7 +215,7 @@ const DonutsNo1 = (p) => {
                     // Add negative offset for second and fourth columns
                     let staggerOffset = 0;
                     if (col === 1 || col === 3) { // Second and fourth columns
-                        staggerOffset = -((gridHeight / 4) * 3);
+                        staggerOffset = -((gridHeight / 32) * 1);
                     }
                     
                     return {
@@ -252,7 +252,7 @@ const DonutsNo1 = (p) => {
                     // Add negative offset for second and fourth rows
                     let staggerOffset = 0;
                     if (row === 1 || row === 3) { // Second and fourth rows
-                        staggerOffset = -((gridWidth / 4) * 3);
+                        staggerOffset = -((gridWidth / 32) * 1);
                     }
                     
                     return {
@@ -279,6 +279,61 @@ const DonutsNo1 = (p) => {
                     x: p.width / 2 + p.cos(diamondAngle) * diamondRadius,
                     y: p.height / 2 + p.sin(diamondAngle) * diamondRadius * 0.6
                 };
+            case 'pentagram': // Sacred geometry pentagram pattern
+                const pentagramIndex = donutIndex;
+                
+                if (pentagramIndex < 5) {
+                    // First 5 donuts form the pentagram points
+                    const pentagramAngle = (pentagramIndex / 5) * p.TWO_PI - p.PI / 2; // Start from top
+                    const pentagramRadius = Math.min(p.width, p.height) * 0.25;
+                    
+                    return {
+                        x: p.width / 2 + p.cos(pentagramAngle) * pentagramRadius,
+                        y: p.height / 2 + p.sin(pentagramAngle) * pentagramRadius
+                    };
+                } else {
+                    // Remaining 15 donuts form a circle around the pentagram
+                    const circleIndex = pentagramIndex - 5;
+                    const circleAngle = (circleIndex / 15) * p.TWO_PI;
+                    const circleRadius = Math.min(p.width, p.height) * 0.45;
+                    
+                    return {
+                        x: p.width / 2 + p.cos(circleAngle) * circleRadius,
+                        y: p.height / 2 + p.sin(circleAngle) * circleRadius
+                    };
+                }
+            case 'flower': // Sacred geometry Flower of Life pattern
+                const flowerIndex = donutIndex;
+                const flowerRadius = Math.min(p.width, p.height) * 0.15;
+                
+                if (flowerIndex < 7) {
+                    // First 7 donuts form the classic Flower of Life pattern
+                    // Center circle + 6 surrounding circles
+                    if (flowerIndex === 0) {
+                        // Center circle
+                        return {
+                            x: p.width / 2,
+                            y: p.height / 2
+                        };
+                    } else {
+                        // 6 surrounding circles
+                        const angle = ((flowerIndex - 1) / 6) * p.TWO_PI;
+                        return {
+                            x: p.width / 2 + p.cos(angle) * flowerRadius,
+                            y: p.height / 2 + p.sin(angle) * flowerRadius
+                        };
+                    }
+                } else {
+                    // Remaining 13 donuts form an outer ring
+                    const outerIndex = flowerIndex - 7;
+                    const outerAngle = (outerIndex / 13) * p.TWO_PI;
+                    const outerRadius = flowerRadius * 2.5;
+                    
+                    return {
+                        x: p.width / 2 + p.cos(outerAngle) * outerRadius,
+                        y: p.height / 2 + p.sin(outerAngle) * outerRadius
+                    };
+                }
         }
     };
 
@@ -293,7 +348,7 @@ const DonutsNo1 = (p) => {
         // Clear subDonuts array when currentCue % 12 === 1
         if (currentCue % 12 === 1) {
             p.subDonuts = [];
-            const patterns = ['circle', 'infinity', 'grid', 'spiral', 'diamond'];
+            const patterns = ['circle', 'infinity', 'grid', 'spiral', 'diamond', 'pentagram', 'flower'];
             p.subDonutPattern = p.random(patterns);
 
             // Prepopulate 20 positions for the pattern with consistent size
