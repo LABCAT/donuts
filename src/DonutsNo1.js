@@ -43,6 +43,111 @@ const DonutsNo1 = (p) => {
         p.currentColorScheme = p.generateColourScheme(p.random(p.colourModes));
         p.mainDonuts = [];  
         p.subDonuts = [];  
+        
+        // Generate all six loops with unique patterns and main donut data
+        p.loops = p.generateLoopData();
+    };
+
+    /**
+     * Generate loop data for all six loops
+     * Each loop gets unique patterns and main donut configurations
+     * @returns {Array} Array of loop objects with pattern, positions, and main donut data
+     */
+    p.generateLoopData = () => {
+        const loops = [];
+        const patterns = ['circle', 'infinity', 'grid', 'spiral', 'diamond', 'pentagram', 'flower'];
+        
+        // Shuffle patterns to ensure each loop gets a unique pattern
+        const shuffledPatterns = p.shuffle([...patterns]);
+        
+        for (let loopIndex = 0; loopIndex < 6; loopIndex++) {
+            const pattern = shuffledPatterns[loopIndex];
+            const numSubDonuts = 20;
+            const baseSize = Math.min(p.width, p.height) * 0.08;
+            let subDonutSize = baseSize * p.random(0.85, 1.15);
+            
+            // Make spiral pattern donuts smaller
+            if (pattern === 'spiral') {
+                subDonutSize = subDonutSize * 0.5;
+            }
+            
+            let subDonutPositions = [];
+            for (let i = 0; i < numSubDonuts; i++) {
+                const pos = p.getSubDonutPosition(pattern, i);
+                subDonutPositions.push({
+                    x: pos.x,
+                    y: pos.y,
+                    size: subDonutSize
+                });
+            }
+            
+            // Shuffle the array for non-spiral patterns
+            if (pattern !== 'spiral') {
+                subDonutPositions = p.shuffle(subDonutPositions);
+            }
+            
+            // Generate main donut data for this loop
+            const mainDonutData = p.generateMainDonutData(loopIndex);
+            
+            loops.push({
+                pattern: pattern,
+                positions: subDonutPositions,
+                loopIndex: loopIndex,
+                mainDonutData: mainDonutData
+            });
+        }
+        
+        return loops;
+    };
+
+    /**
+     * Generate main donut data for a specific loop
+     * @param {number} loopIndex - The index of the loop (0-5)
+     * @returns {Object} Main donut configuration data
+     */
+    p.generateMainDonutData = (loopIndex) => {
+        const mainDonutData = {
+            // For cues 1-7: regular donuts with alternating positions
+            regular: {
+                minSize: (Math.min(p.windowWidth, p.windowHeight) / 3) * 2 / 3,
+                maxSize: (Math.min(p.windowWidth, p.windowHeight) / 3) * 2,
+                positions: []
+            },
+            // For cues 8-11: large centered donuts
+            large: {
+                minSize: 0,
+                maxSizes: [],
+                positions: []
+            }
+        };
+        
+        // Generate regular donut positions (cues 1-8)
+        for (let cue = 1; cue <= 8; cue++) {
+            let x, y;
+            if (p.isPortraitCanvas()) {
+                x = p.width / 2;
+                // Alternate between top quarter and bottom three quarters
+                y = (cue % 2 === 1) ? p.height * 0.25 : p.height * 0.75;
+            } else {
+                // Alternate between left quarter and right three quarters
+                x = (cue % 2 === 1) ? p.width * 0.25 : p.width * 0.75;
+                y = p.height / 2;
+            }
+            mainDonutData.regular.positions.push({ x, y });
+        }
+        
+        // Generate large donut data (cues 8-11)
+        for (let cue = 8; cue <= 11; cue++) {
+            const cueModulus = cue - 1;
+            const maxSize = Math.max(p.windowWidth, p.windowHeight) * (2 - (0.1 * cueModulus));
+            mainDonutData.large.maxSizes.push(maxSize);
+            mainDonutData.large.positions.push({
+                x: p.width / 2,
+                y: p.height / 2
+            });
+        }
+        
+        return mainDonutData;
     };
     
 
@@ -348,35 +453,18 @@ const DonutsNo1 = (p) => {
         // Clear subDonuts array when currentCue % 12 === 1
         if (currentCue % 12 === 1) {
             p.subDonuts = [];
-            const patterns = ['circle', 'infinity', 'grid', 'spiral', 'diamond', 'pentagram', 'flower'];
-            p.subDonutPattern = p.random(patterns);
-
-            // Prepopulate 20 positions for the pattern with consistent size
-            const numSubDonuts = 20;
-            // Sub donut size is based on canvas size with some randomization
-            const baseSize = Math.min(p.width, p.height) * 0.08;
-            let subDonutSize = baseSize * p.random(0.85, 1.15);
-            
-            // Make spiral pattern donuts smaller
-            if (p.subDonutPattern === 'spiral') {
-                subDonutSize = subDonutSize * 0.5; // Half the normal size
-            }
-            let subDonutPositions = [];
-            for (let i = 0; i < numSubDonuts; i++) {
-                const pos = p.getSubDonutPosition(p.subDonutPattern, i);
-                subDonutPositions.push({
-                    x: pos.x,
-                    y: pos.y,
-                    size: subDonutSize
-                });
-            }
-            // Shuffle the array so executeTrack2 can cycle through it
-            if (p.subDonutPattern !== 'spiral') {
-                p.subDonutPositions = p.shuffle(subDonutPositions);
-            }
+            // Determine which loop we're starting (0-5)
+            const loopIndex = Math.floor((currentCue - 1) / 12) % 6;
+            const currentLoop = p.loops[loopIndex];
+            p.subDonutPattern = currentLoop.pattern;
+            p.subDonutPositions = currentLoop.positions;
         }
 
-        // For every 9th, 10th, 11th, and 12th cue, don't divide maxSize by 2
+        // Use pre-generated main donut data from the current loop
+        const loopIndex = Math.floor((currentCue - 1) / 12) % 6;
+        const currentLoop = p.loops[loopIndex];
+        const mainDonutData = currentLoop.mainDonutData;
+        
         let minSize, maxSize;
         let x, y;
 
@@ -385,26 +473,20 @@ const DonutsNo1 = (p) => {
             if (cueModulus === 8) {
                 p.mainDonuts = [];
             }
-            minSize = 0;
-            maxSize = Math.max(p.windowWidth, p.windowHeight) * (2 - (0.1 * cueModulus));
-            // Always center the donut for these cues
-            x = p.width / 2;
-            y = p.height / 2;
+            minSize = mainDonutData.large.minSize;
+            maxSize = mainDonutData.large.maxSizes[cueModulus - 8];
+            const position = mainDonutData.large.positions[cueModulus - 8];
+            x = position.x;
+            y = position.y;
         } else {
             p.mainDonuts = [];
-            maxSize = (Math.min(p.windowWidth, p.windowHeight) / 3) * 2;
-            minSize = maxSize / 3;
-            
-            // Alternate between quarter and three quarter positions
-            if (p.isPortraitCanvas()) {
-                x = p.width / 2;
-                // Alternate between top quarter and bottom three quarters
-                y = (currentCue % 2 === 1) ? p.height * 0.25 : p.height * 0.75;
-            } else {
-                // Alternate between left quarter and right three quarters
-                x = (currentCue % 2 === 1) ? p.width * 0.25 : p.width * 0.75;
-                y = p.height / 2;
-            }
+            minSize = mainDonutData.regular.minSize;
+            maxSize = mainDonutData.regular.maxSize;
+            // cueModulus 0-7 corresponds to cues 1-8, map to array indices 0-7
+            const positionIndex = cueModulus;
+            const position = mainDonutData.regular.positions[positionIndex];
+            x = position.x;
+            y = position.y;
         }
 
         // Always create one main donut
