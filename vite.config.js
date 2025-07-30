@@ -1,10 +1,14 @@
 import { defineConfig } from 'vite';
-import inject from '@rollup/plugin-inject'
+import inject from '@rollup/plugin-inject';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import path from 'path';
 
 export default defineConfig({
-  base: './', // Use relative paths for all built assets
+  base: '/number-1/',
+  build: {
+    outDir: 'dist/number-1',
+    emptyOutDir: true
+  },
   resolve: {
     alias: {
       '@audio': path.resolve(__dirname, 'src/audio'),
@@ -12,28 +16,12 @@ export default defineConfig({
       '@lib': path.resolve(__dirname, 'src/lib'),
     },
   },
-  build: {
-    target: 'esnext',
-  },
   plugins: [
-    inject({
-      p5: 'p5',
-    }),
+    inject({ p5: 'p5' }),
     viteStaticCopy({
       targets: [
-        {
-          src: 'src/audio/*.ogg',
-          dest: 'audio',
-        },
-        {
-          src: 'src/audio/*.mid',
-          dest: 'audio',
-        },
-        {
-          src: 'src/lib/fxhash.min.js',
-          dest: 'lib',
-        },
-      ],
-    }),
-  ],
+        { src: 'public/CNAME', dest: '../' } // put CNAME at dist root
+      ]
+    })
+  ]
 });

@@ -67,8 +67,8 @@ body {
 
 #play-icon {
     position: fixed;
-    top: 20px;
-    right: 20px;
+    top: calc(50% - 60px);
+    right: calc(50% - 60px);
     width: 120px;
     height: 120px;
     fill: var(--play-icon-color);
