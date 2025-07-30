@@ -14,6 +14,7 @@ const DonutsNo1 = (p) => {
     p.bpm = 54;
     p.audioLoaded = false;
     p.songHasFinished = false;
+    p.showingStatic = true;
 
     /** 
      * Preload function - Loading audio and setting up MIDI
@@ -24,7 +25,13 @@ const DonutsNo1 = (p) => {
          * Log when preload starts
          */
         p.song = p.loadSound(audio, p.loadMidi);
-        p.song.onended(() => p.songHasFinished = true);
+        p.song.onended(() => {
+            p.songHasFinished = true;
+            if (p.canvas) {
+                p.canvas.classList.add('p5Canvas--cursor-play');
+                p.canvas.classList.remove('p5Canvas--cursor-pause');
+            }
+        });
     };
 
     /** 
@@ -156,7 +163,17 @@ const DonutsNo1 = (p) => {
      * This runs continuously after setup
      */
     p.draw = () => {
-        if(p.audioLoaded && p.song.isPlaying() || p.songHasFinished){
+        if (p.showingStatic) {
+            p.background(0, 0, 0);
+            // Show the final loop (loop 5) as static preview
+            const finalLoop = p.loops[5];
+            if (finalLoop) {
+                // Create a static display of the final loop's pattern
+                p.displayStaticLoop(finalLoop);
+            }
+            hl.token.capturePreview();
+            p.noLoop(); // Stop the draw loop until song starts
+        } else if(p.audioLoaded && p.song.isPlaying() || p.songHasFinished){
             p.background(0, 0, 0);
             p.mainDonuts.forEach(donut => {
                 donut.draw();
@@ -525,6 +542,35 @@ const DonutsNo1 = (p) => {
         subDonut.initDraw(duration);
     }
 
+    /**
+     * Display a static preview of a loop pattern
+     * @param {Object} loop - The loop object with pattern and positions
+     */
+    p.displayStaticLoop = (loop) => {
+        // Draw all 4 main donuts as in cues 8-11
+        const mainDonutData = loop.mainDonutData;
+        for (let i = 0; i < 4; i++) {
+            const maxSize = mainDonutData.large.maxSizes[i] * 0.8;
+            const pos = mainDonutData.large.positions[i];
+            const mainDonut = new Donut(p, 0, maxSize, pos.x, pos.y, 0.5);
+            mainDonut.size = maxSize;
+            mainDonut.drawProgressEnabled = true;
+            mainDonut.drawProgress = 1;
+            mainDonut.draw();
+        }
+
+        p.background(0, 0, 0, 0.7);
+        // Draw sub donuts in the pattern
+        loop.positions.forEach((pos, index) => {
+            const subSize = pos.size || 30;
+            const subDonut = new Donut(p, subSize, subSize, pos.x, pos.y, 0.1);
+            subDonut.size = subSize;
+            subDonut.drawProgressEnabled = true;
+            subDonut.drawProgress = 1;
+            subDonut.draw();
+        });
+    };
+
     /** 
      * Handle mouse/touch interaction
      * Controls play/pause and reset functionality
@@ -545,6 +591,8 @@ const DonutsNo1 = (p) => {
                 }
                 document.getElementById("play-icon").classList.remove("fade-in");
                 p.song.play();
+                p.showingStatic = false;
+                p.loop(); // Restart the draw loop
                 if (p.canvas) {
                     p.canvas.classList.add('p5Canvas--cursor-pause');
                     p.canvas.classList.remove('p5Canvas--cursor-play');
