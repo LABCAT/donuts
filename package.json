@@ -16,6 +16,7 @@
   "dependencies": {
     "@tonejs/midi": "^2.0.28",
     "astro": "^5.15",
+    "jszip": "^3.10.1",
     "normalize.css": "^8.0.1",
     "p5": "^1.11.2"
   },

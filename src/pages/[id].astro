@@ -24,9 +24,10 @@ const { sketchInfo } = Astro.props;
     const el = document.getElementById('sketch-canvas');
     const sketchId = el?.getAttribute('data-sketch-id');
     if (sketchId && el) {
-      const load = sketchId === 'number-1'
-        ? () => import('p5/lib/addons/p5.sound').then(() => import('@sketches/DonutsNo1.js'))
-        : () => import('@sketches/DonutsNo2.js');
+      const load =
+        sketchId === 'number-1'
+          ? () => import('../sketches/DonutsNo1.js')
+          : () => import('../sketches/DonutsNo2.js');
       load().then((mod) => {
         new p5(mod.default, el);
       });

@@ -1,14 +1,19 @@
+import p5 from 'p5';
+window.p5 = p5;
+import '@lib/p5.audioReact.js';
+import initCapture from '@lib/p5.capture.js';
 import '@lib/p5.polygon.js';
-import { Midi } from '@tonejs/midi';
 import { Donut } from './classes/Donut.js';
 import ColorGenerator from '@lib/p5.colorGenerator.js';
 
-const base = typeof import.meta.env !== 'undefined' && import.meta.env.BASE_URL ? import.meta.env.BASE_URL : '/';
-const audio = base + (base.endsWith('/') ? '' : '/') + 'audio/DonutsNo1.ogg';
-const midi = base + (base.endsWith('/') ? '' : '/') + 'audio/DonutsNo1.mid';
+const base = import.meta.env.BASE_URL || './';
+const audio = base + 'audio/DonutsNo1.ogg';
+const midi = base + 'audio/DonutsNo1.mid';
 
 const DonutsNo1 = (p) => {
   p.song = null;
+  p.audioSampleRate = 0;
+  p.totalAnimationFrames = 0;
   p.PPQ = 3840 * 4;
   p.bpm = 54;
   p.audioLoaded = false;
@@ -16,26 +21,36 @@ const DonutsNo1 = (p) => {
   p.showingStatic = true;
 
   p.preload = () => {
-    p.song = p.loadSound(audio, p.loadMidi);
-    p.song.onended(() => {
-      p.songHasFinished = true;
-      if (p.canvas) {
-        p.canvas.classList.add('p5Canvas--cursor-play');
-        p.canvas.classList.remove('p5Canvas--cursor-pause');
-      }
+    p.loadSong(audio, midi, (result) => {
+      const track1 = result.tracks[16].notes;
+      const track2 = result.tracks[10].notes;
+      p.scheduleCueSet(track1, 'executeTrack1');
+      p.scheduleCueSet(track2, 'executeTrack2');
+      p.hideLoader();
     });
   };
 
   p.setup = () => {
-    const seed = typeof hl !== 'undefined' && hl?.tx
-      ? p.hashToSeed(hl.tx.hash + hl.tx.tokenId)
-      : Math.floor(Math.random() * 1e9);
-    if (typeof hl !== 'undefined' && hl?.tx) {
-      console.log(`Hash: ${hl.tx.hash}, TokenID: ${hl.tx.tokenId}, Seed: ${seed}`);
-    }
-    p.randomSeed(seed);
     p.createCanvas(p.windowWidth, p.windowHeight);
     p.canvas.classList.add('p5Canvas--cursor-play');
+    p.canvas.style.position = 'relative';
+    p.canvas.style.zIndex = '1';
+    initCapture(p, {
+      prefix: 'DonutsNo1',
+      enabled: false,
+      captureCSSBackground: false,
+    });
+
+    const seed =
+      typeof hl !== 'undefined' && hl?.tx
+        ? p.hashToSeed(hl.tx.hash + hl.tx.tokenId)
+        : Math.floor(Math.random() * 1e9);
+    if (typeof hl !== 'undefined' && hl?.tx) {
+      console.log(
+        `Hash: ${hl.tx.hash}, TokenID: ${hl.tx.tokenId}, Seed: ${seed}`
+      );
+    }
+    p.randomSeed(seed);
     p.background(0, 0, 0);
     p.rectMode(p.CENTER);
     p.colorMode(p.HSB);
@@ -116,34 +131,6 @@ const DonutsNo1 = (p) => {
         donut.draw();
         donut.update();
       });
-    }
-  };
-
-  p.loadMidi = () => {
-    Midi.fromUrl(midi).then((result) => {
-      console.log('MIDI loaded:', result);
-      const track1 = result.tracks[16].notes;
-      const track2 = result.tracks[10].notes;
-      p.scheduleCueSet(track1, 'executeTrack1');
-      p.scheduleCueSet(track2, 'executeTrack2');
-      const loader = document.getElementById('loader');
-      const playIcon = document.getElementById('play-icon');
-      if (loader) loader.classList.add('loading--complete');
-      if (playIcon) playIcon.classList.add('fade-in');
-      p.audioLoaded = true;
-    });
-  };
-
-  p.scheduleCueSet = (noteSet, callbackName, polyMode = false) => {
-    let lastTicks = -1, currentCue = 1;
-    for (let i = 0; i < noteSet.length; i++) {
-      const note = noteSet[i], { ticks, time } = note;
-      if (ticks !== lastTicks || polyMode) {
-        note.currentCue = currentCue;
-        p.song.addCue(time, p[callbackName], note);
-        lastTicks = ticks;
-        currentCue++;
-      }
     }
   };
 
@@ -378,25 +365,8 @@ const DonutsNo1 = (p) => {
   };
 
   p.mousePressed = () => {
-    if (p.audioLoaded) {
-      if (p.song.isPlaying()) {
-        p.song.pause();
-        if (p.canvas) {
-          p.canvas.classList.add('p5Canvas--cursor-play');
-          p.canvas.classList.remove('p5Canvas--cursor-pause');
-        }
-      } else {
-        const playIcon = document.getElementById('play-icon');
-        if (playIcon) playIcon.classList.remove('fade-in');
-        p.song.play();
-        p.showingStatic = false;
-        p.loop();
-        if (p.canvas) {
-          p.canvas.classList.add('p5Canvas--cursor-pause');
-          p.canvas.classList.remove('p5Canvas--cursor-play');
-        }
-      }
-    }
+    p.togglePlayback();
+    if (p.audioLoaded && p.song?.isPlaying()) p.loop();
   };
 
   p.hashToSeed = (str) => {
