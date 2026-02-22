@@ -1,0 +1,35 @@
+---
+import SketchLayout from '@layouts/SketchLayout.astro';
+import { sketchMetadata } from '@/sketchMetadata.js';
+
+export async function getStaticPaths() {
+  return Object.keys(sketchMetadata).map((id) => ({
+    params: { id },
+    props: { sketchInfo: sketchMetadata[id] },
+  }));
+}
+
+const { id } = Astro.params;
+const { sketchInfo } = Astro.props;
+---
+
+<SketchLayout
+  title={sketchInfo.title}
+  description={sketchInfo.description}
+  sketchId={id}
+>
+  <script>
+    import p5 from 'p5';
+    window.p5 = p5;
+    const el = document.getElementById('sketch-canvas');
+    const sketchId = el?.getAttribute('data-sketch-id');
+    if (sketchId && el) {
+      const load = sketchId === 'number-1'
+        ? () => import('p5/lib/addons/p5.sound').then(() => import('@sketches/DonutsNo1.js'))
+        : () => import('@sketches/DonutsNo2.js');
+      load().then((mod) => {
+        new p5(mod.default, el);
+      });
+    }
+  </script>
+</SketchLayout>
