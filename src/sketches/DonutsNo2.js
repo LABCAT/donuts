@@ -2,6 +2,8 @@ import p5 from 'p5';
 window.p5 = p5;
 import 'p5/lib/addons/p5.sound';
 import '@lib/p5.audioReact.js';
+import '@lib/p5.polygon.js';
+import { Donut } from './classes/Donut.js';
 
 const base = import.meta.env.BASE_URL || './';
 const audio = base + 'audio/DonutsNo2.mp3';
@@ -15,18 +17,38 @@ const DonutsNo2 = (p) => {
 
   p.preload = () => {
     p.loadSong(audio, midi, (result) => {
-      const track9 = result.tracks[10].notes;
-      p.scheduleCueSet(track9, 'executeTrack1');
+      const tColor = result.tracks[10];
+      const tSpikes = result.tracks[9];
+      const tArc = result.tracks[11];
+      const tGlyph = result.tracks[16];
+
+      if (tColor && Array.isArray(tColor.notes) && tColor.notes.length) {
+        p.scheduleCueSet(tColor.notes, 'executeTrack1');
+      }
+      if (tSpikes && Array.isArray(tSpikes.notes) && tSpikes.notes.length) {
+        p.scheduleCueSet(tSpikes.notes, 'executeTrack2');
+      }
+      if (tArc && Array.isArray(tArc.notes) && tArc.notes.length) {
+        p.scheduleCueSet(tArc.notes, 'executeTrack3');
+      }
+      if (tGlyph && Array.isArray(tGlyph.notes) && tGlyph.notes.length) {
+        p.scheduleCueSet(tGlyph.notes, 'executeTrack4');
+      }
     });
   };
 
   p.setup = () => {
     p.createCanvas(p.windowWidth, p.windowHeight);
     p.angleMode(p.DEGREES);
+    p.rectMode(p.CENTER);
     p.colorMode(p.HSB, 360, 100, 100, 1);
     p.fft = new p5.FFT();
     p.currentHue = 200;
+    p.currentColorScheme = [];
+    for (let h = 0; h < 360; h += 45) p.currentColorScheme.push(p.color(h, 80, 100));
     p.blackFade = { active: false, startTime: 0, duration: 0 };
+    p.centerDonuts = [];
+    p.waveBursts = [];
     p.setComplementaryCanvasBg();
     p.noLoop();
   };
@@ -39,6 +61,60 @@ const DonutsNo2 = (p) => {
     p.blackFade.startTime = p.song.currentTime() * 1000;
     p.blackFade.duration = duration * 1000;
     p.setComplementaryCanvasBg();
+
+    const baseSize = p.min(p.width, p.height) * 4;
+    const triHues = [
+      p.currentHue,
+      (p.currentHue + 120) % 360,
+      (p.currentHue + 240) % 360,
+    ];
+    p.centerDonuts = [];
+    const nowMs = p.song.currentTime() * 1000;
+
+    for (let i = 0; i < 3; i++) {
+      const sizeFactor = Math.pow(0.25, i); // 1, 0.25, 0.0625
+      const fullSize = baseSize * sizeFactor;
+      p.currentColorScheme = [p.color(triHues[i], 80, 100)];
+      const d = new Donut(p, fullSize / 4, fullSize, 0, 0, 0.8);
+      d.drawProgressEnabled = false;
+      d.zoomStartTime = nowMs;
+      d.zoomDuration = duration * 1000;
+      d.zoomFullSize = fullSize;
+      p.centerDonuts.push(d);
+    }
+  };
+
+  p.spawnWaveBurst = (note, style) => {
+    const { durationTicks } = note;
+    const duration = (durationTicks / p.PPQ) * (60 / p.bpm);
+    const margin = p.min(p.width, p.height) * 0.1;
+    const x = p.random(-p.width / 2 + margin, p.width / 2 - margin);
+    const y = p.random(-p.height / 2 + margin, p.height / 2 - margin);
+    const scale = p.random(0.25, 0.6);
+    const nowMs = p.song.currentTime() * 1000;
+    p.waveBursts.push({
+      x,
+      y,
+      scale,
+      startTime: nowMs,
+      duration: duration * 1000,
+      style,
+      phase: p.random(0, 60),
+      baseAngle: p.random(0, 180),
+      spikes: p.floor(p.random(5, 10)),
+    });
+  };
+
+  p.executeTrack2 = (note) => {
+    p.spawnWaveBurst(note, 'spikes');
+  };
+
+  p.executeTrack3 = (note) => {
+    p.spawnWaveBurst(note, 'arc');
+  };
+
+  p.executeTrack4 = (note) => {
+    p.spawnWaveBurst(note, 'glyphTrail');
   };
 
   p.randomHexFromHue = (baseHue, hueSpread = 30, satRange = [50, 80], lightRange = [30, 60]) => {
@@ -89,25 +165,31 @@ const DonutsNo2 = (p) => {
 
   p.draw = () => {
     p.clear();
+    p.translate(p.width / 2, p.height / 2);
 
     const size = p.min(p.width, p.height);
     const rMax = size * 0.6;
     const rMin = size * 0.2;
-
-    p.fft.analyze();
-    const wave = p.fft.waveform();
-
-    p.noFill();
-    const numLayers = 7;
-    const centerLayer = 3;
     const hue = p.currentHue ?? 200;
-
     p.blendMode(p.NORMAL);
+
+    // if (Array.isArray(p.centerDonuts) && p.centerDonuts.length > 0) {
+    //   const nowMs = p.song.currentTime() * 1000;
+    //   for (const d of p.centerDonuts) {
+    //     const elapsed = nowMs - (d.zoomStartTime || 0);
+    //     const progress = d.zoomDuration ? p.constrain(elapsed / d.zoomDuration, 0, 1) : 1;
+    //     const eased = Math.pow(progress, 2);
+    //     d.size = (d.zoomFullSize || d.maxSize || size * 0.3) * eased;
+    //     d.draw();
+    //   }
+    // }
+
+    
 
     if (p.blackFade.active) {
       const elapsed = p.song.currentTime() * 1000 - p.blackFade.startTime;
       const progress = p.constrain(elapsed / p.blackFade.duration, 0, 1);
-      const easedProgress = Math.pow(progress, 1);
+      const easedProgress = Math.pow(progress, 2);
       const opacity = 1 - easedProgress;
       p.push();
       p.colorMode(p.RGB, 255);
@@ -118,29 +200,139 @@ const DonutsNo2 = (p) => {
       if (progress >= 1) p.blackFade.active = false;
     }
 
-    p.translate(p.width / 2, p.height / 2);
-
-    p.blendMode(p.ADD);
-
+    p.fft.analyze();
+    const wave = p.fft.waveform();
+    p.noFill();
+    const centerLayer = 3;
     const layerOrder = [0, 1, 2, 4, 5, 6, 3];
-    for (const layer of layerOrder) {
-      const distFromCenter = p.abs(layer - centerLayer);
-      const alpha = p.map(distFromCenter, 0, centerLayer, 0.8, 0.15);
-      p.stroke(hue, 75, 100, alpha);
-      p.strokeWeight(layer === centerLayer ? 6 : 3);
-      const offset = (layer - centerLayer) * 2.2;
-      for (let t = -1; t <= 1; t += 2) {
-        p.beginShape();
-        for (let i = 0; i <= 180; i += 0.5) {
-          const index = p.floor(p.map(i, 0, 180, 0, wave.length - 1));
-          const r = p.map(wave[index], -1, 1, rMin, rMax) + offset;
-          const x = r * p.sin(i) * t;
-          const y = r * p.cos(i);
-          p.vertex(x, y);
+
+    // main waveform at center
+    p.blendMode(p.ADD);
+    for (const scale of [1, 0.5]) {
+      for (const layer of layerOrder) {
+        const distFromCenter = p.abs(layer - centerLayer);
+        const alpha = p.map(distFromCenter, 0, centerLayer, 0.8, 0.15);
+        p.stroke(hue, 75, 100, alpha);
+        p.strokeWeight((layer === centerLayer ? 32 : 3) * scale);
+        const offset = (layer - centerLayer) * 2.2 * scale;
+        for (let t = -1; t <= 1; t += 2) {
+          p.beginShape();
+          for (let i = 0; i <= 180; i += 0.5) {
+            const index = p.floor(p.map(i, 0, 180, 0, wave.length - 1));
+            const r = (p.map(wave[index], -1, 1, rMin, rMax) + offset) * scale;
+            const x = r * p.sin(i) * t;
+            const y = r * p.cos(i);
+            p.vertex(x, y);
+          }
+          p.endShape();
         }
-        p.endShape();
       }
     }
+
+    // smaller waveform copies for active bursts
+    if (Array.isArray(p.waveBursts) && p.waveBursts.length > 0) {
+      const nowMs = p.song.currentTime() * 1000;
+      const stillActive = [];
+      const burstHue = (hue + 40) % 360;
+      for (const burst of p.waveBursts) {
+        const life = (nowMs - burst.startTime) / burst.duration;
+        if (life >= 1) continue;
+        stillActive.push(burst);
+        const alphaScale = 0.65 * (1 - life) + 0.25;
+        const style = burst.style || 'spikes';
+
+        if (style === 'spikes') {
+          const spikes = burst.spikes || 5;
+          const spikeAmp = 0.6;
+          for (const scale of [1, 0.5]) {
+            for (const layer of layerOrder) {
+              const distFromCenter = p.abs(layer - centerLayer);
+              const alpha = p.map(distFromCenter, 0, centerLayer, 0.8, 0.15) * alphaScale;
+              p.stroke(burstHue, 75, 100, alpha);
+              p.strokeWeight((layer === centerLayer ? 16 : 3) * scale);
+              const offset = (layer - centerLayer) * 1.6 * burst.scale;
+              for (let t = -1; t <= 1; t += 2) {
+                p.beginShape();
+                for (let i = 0; i <= 180; i += 0.5) {
+                  const angleRad = p.radians(i);
+                  const spike = 1 + spikeAmp * Math.cos(angleRad * spikes + p.radians(burst.phase || 0));
+                  const index = p.floor(p.map(i, 0, 180, 0, wave.length - 1));
+                  const baseR = p.map(wave[index], -1, 1, rMin, rMax);
+                  const r = (baseR * burst.scale * spike + offset) * scale;
+                  const x = burst.x + r * p.sin(i) * t;
+                  const y = burst.y + r * p.cos(i);
+                  p.vertex(x, y);
+                }
+                p.endShape();
+              }
+            }
+          }
+        } else if (style === 'arc') {
+          const span = 30;
+          const centerAngle = (burst.baseAngle || 0) + life * 120;
+          for (const layer of layerOrder) {
+            const distFromCenter = p.abs(layer - centerLayer);
+            const baseAlpha = p.map(distFromCenter, 0, centerLayer, 0.9, 0.2);
+            p.stroke(burstHue, 90, 100, baseAlpha * alphaScale);
+            p.strokeWeight(layer === centerLayer ? 4 : 2.5);
+            const offset = (layer - centerLayer) * 1.4 * burst.scale;
+            for (let t = -1; t <= 1; t += 2) {
+              p.beginShape();
+              for (let i = centerAngle - span; i <= centerAngle + span; i += 0.5) {
+                const iClamped = p.constrain(i, 0, 180);
+                const index = p.floor(p.map(iClamped, 0, 180, 0, wave.length - 1));
+                const baseR = p.map(wave[index], -1, 1, rMin, rMax);
+                const r = baseR * burst.scale + offset;
+                const x = burst.x + r * p.sin(iClamped) * t;
+                const y = burst.y + r * p.cos(iClamped);
+                p.vertex(x, y);
+              }
+              p.endShape();
+            }
+          }
+        } else if (style === 'glyphTrail') {
+          for (let i = 0; i <= 180; i += 6) {
+            const index = p.floor(p.map(i, 0, 180, 0, wave.length - 1));
+            const baseR = p.map(wave[index], -1, 1, rMin, rMax) * burst.scale;
+            const jitter = p.random(-14, 14);
+            for (let t = -1; t <= 1; t += 2) {
+              const x = burst.x + (baseR + jitter) * p.sin(i) * t;
+              const y = burst.y + (baseR + jitter) * p.cos(i);
+              const s = 32 * burst.scale * (1 - life);
+              p.push();
+              p.translate(x, y);
+              p.rotate(p.radians(i + (burst.phase || 0)));
+              p.noFill();
+              p.strokeWeight(8 * burst.scale);
+
+              if (i % 12 === 0) {
+                for (let k = 0; k < 4; k++) {
+                  const hCol = (burstHue + k * 90 + i * 2) % 360;
+                  p.stroke(hCol, 100, 100, 0.9 * alphaScale);
+                  p.push();
+                  p.rotate(p.radians(k * 15));
+                  p.rect(0, 0, s * 12, s * 12);
+                  p.pop();
+                }
+              } else {
+                for (let k = 0; k < 4; k++) {
+                  const angle = p.radians(k * 90);
+                  const offsetR = s * 1.5;
+                  const ox = offsetR * p.cos(angle);
+                  const oy = offsetR * p.sin(angle);
+                  const hCol = (burstHue + k * 60 + i * 1.5) % 360;
+                  p.stroke(hCol, 100, 100, 0.9 * alphaScale);
+                  p.ellipse(ox, oy, s * 12, s * 12);
+                }
+              }
+              p.pop();
+            }
+          }
+        }
+      }
+      p.waveBursts = stillActive;
+    }
+
   };
 
   p.mousePressed = () => {
