@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 
-export default function initCapture(p, options = {}) {
+const initCapture = (p, options = {}) => {
   const isOptionsObject =
     options && typeof options === 'object' && !Array.isArray(options);
   const prefix = isOptionsObject
@@ -56,6 +56,16 @@ export default function initCapture(p, options = {}) {
     });
   };
 
+  const feedFFTFromBuffer = (p, frameTime) => {
+    if (!p.fft?.analyser || !p.song?.buffer) return Promise.resolve();
+    const ctx = p.fft.analyser.context;
+    const src = ctx.createBufferSource();
+    src.buffer = p.song.buffer;
+    src.connect(p.fft.analyser);
+    src.start(0, frameTime, frameTime + 1 / 60);
+    return new Promise((r) => setTimeout(r, 20));
+  };
+
   p.capture = async () => {
     p.captureInProgress = true;
     p.capturedFrames = [];
@@ -68,57 +78,65 @@ export default function initCapture(p, options = {}) {
 
     p.song._lastPos = 0;
 
-    for (let frame = 0; frame < p.totalAnimationFrames; frame++) {
-      console.log(`Capturing frame ${frame + 1} / ${p.totalAnimationFrames}`);
-      const frameTime = frame / 60;
+    const hasFFT = p.fft?.analyser && p.song?.buffer;
 
-      if (cueIndex < cues.length && cues[cueIndex].time <= frameTime) {
-        const cue = cues[cueIndex];
-        cue.callback.call(cue.scope || p, cue.val);
-        cueIndex++;
+    try {
+      for (let frame = 0; frame < p.totalAnimationFrames; frame++) {
+        console.log(`Capturing frame ${frame + 1} / ${p.totalAnimationFrames}`);
+        const frameTime = frame / 60;
+
+        if (cueIndex < cues.length && cues[cueIndex].time <= frameTime) {
+          const cue = cues[cueIndex];
+          cue.callback.call(cue.scope || p, cue.val);
+          cueIndex++;
+        }
+
+        p.song._lastPos = Math.max(0, frameTime * p.audioSampleRate);
+
+        if (hasFFT) {
+          await feedFFTFromBuffer(p, frameTime);
+        }
+
+        p.draw();
+
+        await p.captureFrame();
+
+        if (p.capturedFrames.length >= 1500) {
+          await p.downloadFramesPart();
+        }
       }
 
-      p.song._lastPos = Math.max(0, frameTime * p.audioSampleRate);
-
-      p.draw();
-
-      await p.captureFrame();
-
-      if (p.capturedFrames.length >= 1500) {
+      if (p.capturedFrames.length > 0) {
         await p.downloadFramesPart();
       }
+    } finally {
+      p.captureInProgress = false;
     }
-
-    if (p.capturedFrames.length > 0) {
-      await p.downloadFramesPart();
-    }
-
-    p.captureInProgress = false;
 
     console.log(`Capture complete. Downloaded ${p.frameNumber} frames.`);
   };
 
-  p.downloadFramesPart = async () => {
-    if (p.capturedFrames.length === 0) return;
+  p.downloadFramesPart = async (framesArg) => {
+    const frames = framesArg ?? p.capturedFrames;
+    if (frames.length === 0) return;
 
     console.log(
-      `Creating ZIP part ${p.zipPartNumber} with ${p.capturedFrames.length} frames...`
+      `Creating ZIP part ${p.zipPartNumber} with ${frames.length} frames...`
     );
 
-    p.capturedFrames.sort((a, b) => a.frameNumber - b.frameNumber);
-
+    const sorted = frames.slice().sort((a, b) => a.frameNumber - b.frameNumber);
     const zip = new JSZip();
 
-    for (let i = 0; i < p.capturedFrames.length; i++) {
-      const frame = p.capturedFrames[i];
-      zip.file(frame.filename, frame.blob, { binary: true });
+    for (let i = 0; i < sorted.length; i++) {
+      const frame = sorted[i];
+      const blob = frame.blob || (await (await fetch(frame.dataUrl)).blob());
+      zip.file(frame.filename, blob, { binary: true });
 
       if ((i + 1) % 100 === 0) {
         console.log(
-          `Added ${i + 1} / ${p.capturedFrames.length} to part ${p.zipPartNumber}...`
+          `Added ${i + 1} / ${sorted.length} to part ${p.zipPartNumber}...`
         );
       }
-      frame.blob = null;
     }
 
     if (p.zipPartNumber === 1) {
@@ -147,7 +165,7 @@ export default function initCapture(p, options = {}) {
 
     console.log(`Downloaded ZIP part ${p.zipPartNumber}`);
 
-    p.capturedFrames = [];
+    if (!framesArg) p.capturedFrames = [];
     p.zipPartNumber++;
   };
 
@@ -214,4 +232,6 @@ export default function initCapture(p, options = {}) {
   }
 
   return p;
-}
+};
+
+export default initCapture;

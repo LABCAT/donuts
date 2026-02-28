@@ -8,6 +8,7 @@ if (p5) {
     this.song = this.loadSound(audioUrl, (sound) => {
       this.audioSampleRate = sound.sampleRate();
       this.totalAnimationFrames = Math.floor(sound.duration() * 60);
+      this.totalAnimationFrames = 100;
       this.loadMidi(midiUrl, callback);
     });
     this.song.onended(() => {
