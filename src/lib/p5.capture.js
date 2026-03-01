@@ -56,14 +56,17 @@ const initCapture = (p, options = {}) => {
     });
   };
 
-  const feedFFTFromBuffer = (p, frameTime) => {
-    if (!p.fft?.analyser || !p.song?.buffer) return Promise.resolve();
-    const ctx = p.fft.analyser.context;
-    const src = ctx.createBufferSource();
-    src.buffer = p.song.buffer;
-    src.connect(p.fft.analyser);
-    src.start(0, frameTime, frameTime + 1 / 60);
-    return new Promise((r) => setTimeout(r, 20));
+  const waveformFromBuffer = (song, bins = 1024) => {
+    if (!song?.buffer?.getChannelData || typeof song._lastPos !== 'number') return null;
+    const ch = song.buffer.getChannelData(0);
+    const endSample = Math.floor(song._lastPos);
+    const start = Math.max(0, endSample - bins);
+    const out = [];
+    for (let i = 0; i < bins; i++) {
+      const idx = start + i;
+      out.push(idx < ch.length ? ch[idx] : 0);
+    }
+    return out;
   };
 
   p.capture = async () => {
@@ -78,7 +81,16 @@ const initCapture = (p, options = {}) => {
 
     p.song._lastPos = 0;
 
-    const hasFFT = p.fft?.analyser && p.song?.buffer;
+    const hasFFT = p.fft && typeof p.fft.waveform === 'function';
+    const originalWaveform = hasFFT ? p.fft.waveform.bind(p.fft) : null;
+
+    if (hasFFT) {
+      p.fft.waveform = (bins, mode) => {
+        const b = typeof bins === 'number' ? bins : 1024;
+        const arr = waveformFromBuffer(p.song, b);
+        return arr ? arr.slice() : originalWaveform.call(p.fft, bins, mode);
+      };
+    }
 
     try {
       for (let frame = 0; frame < p.totalAnimationFrames; frame++) {
@@ -93,10 +105,6 @@ const initCapture = (p, options = {}) => {
 
         p.song._lastPos = Math.max(0, frameTime * p.audioSampleRate);
 
-        if (hasFFT) {
-          await feedFFTFromBuffer(p, frameTime);
-        }
-
         p.draw();
 
         await p.captureFrame();
@@ -110,6 +118,7 @@ const initCapture = (p, options = {}) => {
         await p.downloadFramesPart();
       }
     } finally {
+      if (hasFFT && originalWaveform) p.fft.waveform = originalWaveform;
       p.captureInProgress = false;
     }
 
@@ -171,7 +180,17 @@ const initCapture = (p, options = {}) => {
 
   p.gradientToPng = (cssValue, width, height) => {
     return new Promise((resolve) => {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="${cssValue}"/></svg>`;
+      if (!cssValue || cssValue === 'none') {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        resolve(canvas);
+        return;
+      }
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;background:${cssValue.replace(/"/g, '&quot;')}"/></foreignObject></svg>`;
       const blob = new Blob([svg], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
       const img = new Image();
@@ -182,6 +201,16 @@ const initCapture = (p, options = {}) => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
         URL.revokeObjectURL(url);
+        resolve(canvas);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
         resolve(canvas);
       };
       img.src = url;
