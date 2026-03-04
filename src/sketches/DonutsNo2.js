@@ -38,8 +38,8 @@ const DonutsNo2 = (p) => {
     p.createCanvas(p.windowWidth, p.windowHeight);
     initCapture(p, {
       prefix: 'DonutsNo2',
-      enabled: true,
-      captureCSSBackground: true,
+      enabled: false,
+      captureCSSBackground: false,
     });
     p.angleMode(p.DEGREES);
     p.rectMode(p.CENTER);
