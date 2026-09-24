@@ -1,8 +1,7 @@
 import p5 from 'p5';
-window.p5 = p5;
 import '@lib/p5.audioReact.js';
-import initCapture from '@lib/p5.capture.js';
-import '@lib/p5.polygon.js';
+import initCapture from '@labcat2020/p5.audioreactive-capture';
+import '@labcat2020/p5.polygon';
 import { Donut } from './classes/Donut.js';
 import ColorGenerator from '@lib/p5.colorGenerator.js';
 
@@ -10,7 +9,7 @@ const base = import.meta.env.BASE_URL || './';
 const audio = base + 'audio/DonutsNo1.ogg';
 const midi = base + 'audio/DonutsNo1.mid';
 
-const DonutsNo1 = (p) => {
+const sketch = (p) => {
   p.song = null;
   p.audioSampleRate = 0;
   p.totalAnimationFrames = 0;
@@ -20,17 +19,7 @@ const DonutsNo1 = (p) => {
   p.songHasFinished = false;
   p.showingStatic = true;
 
-  p.preload = () => {
-    p.loadSong(audio, midi, (result) => {
-      const track1 = result.tracks[16].notes;
-      const track2 = result.tracks[10].notes;
-      p.scheduleCueSet(track1, 'executeTrack1');
-      p.scheduleCueSet(track2, 'executeTrack2');
-      p.hideLoader();
-    });
-  };
-
-  p.setup = () => {
+  p.setup = async () => {
     p.createCanvas(p.windowWidth, p.windowHeight);
     p.canvas.classList.add('p5Canvas--cursor-play');
     p.canvas.style.position = 'relative';
@@ -58,6 +47,13 @@ const DonutsNo1 = (p) => {
     p.mainDonuts = [];
     p.subDonuts = [];
     p.loops = p.generateLoopData();
+
+    await p.loadSong(audio, midi, (result) => {
+      const track1 = result.tracks[16].notes;
+      const track2 = result.tracks[10].notes;
+      p.scheduleCueSet(track1, 'executeTrack1');
+      p.scheduleCueSet(track2, 'executeTrack2');
+    });
   };
 
   p.generateLoopData = () => {
@@ -366,7 +362,10 @@ const DonutsNo1 = (p) => {
 
   p.mousePressed = () => {
     p.togglePlayback();
-    if (p.audioLoaded && p.song?.isPlaying()) p.loop();
+    if (p.audioLoaded && p.song?.isPlaying()) {
+      p.showingStatic = false;
+      p.loop();
+    }
   };
 
   p.hashToSeed = (str) => {
@@ -380,4 +379,4 @@ const DonutsNo1 = (p) => {
   p.isPortraitCanvas = () => p.height > p.width;
 };
 
-export default DonutsNo1;
+new p5(sketch);

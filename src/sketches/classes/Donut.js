@@ -56,13 +56,13 @@ export class Donut {
     initDraw(duration) {
         this.drawProgressEnabled = true;
         this.drawDuration = duration * 1000;
-        this.drawBirthTime = this.p.song.currentTime() * 1000;
+        this.drawBirthTime = this.p.getSongPlaybackTime() * 1000;
         this.drawProgress = 0;
     }
 
     updateDrawProgress() {
         if (this.drawProgressEnabled && this.drawBirthTime) {
-            const currentTime = this.p.song.currentTime() * 1000;
+            const currentTime = this.p.getSongPlaybackTime() * 1000;
             const elapsed = currentTime - this.drawBirthTime;
             const rawProgress = elapsed / this.drawDuration;
             this.drawProgress = this.p.constrain(rawProgress, 0, 1);
@@ -71,12 +71,12 @@ export class Donut {
 
     init(duration) {
         this.duration = duration * 1000 * 0.8;
-        this.birthTime = this.p.song.currentTime() * 1000;
+        this.birthTime = this.p.getSongPlaybackTime() * 1000;
         this.progress = 0;
     }
 
     update() {
-        const currentTime = this.p.song.currentTime() * 1000;
+        const currentTime = this.p.getSongPlaybackTime() * 1000;
         const elapsed = currentTime - this.birthTime;
         const rawProgress = elapsed / this.duration;
         this.progress = this.p.constrain(rawProgress, 0, 1);

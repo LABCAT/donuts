@@ -1,35 +1,31 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
-import inject from '@rollup/plugin-inject';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import {
+  astroAnimationsScssPrepend,
+  astroAnimationsViteAliases,
+  astroAnimationsViteConfig,
+} from '@labcat2020/animation-lab/vite';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
+// https://astro.build/config
 export default defineConfig({
   site: 'https://donuts.labcat.nz',
-  devToolbar: { enabled: false },
+  devToolbar: {
+    enabled: false,
+  },
   base: '/',
   vite: {
-    plugins: [
-      inject({
-        p5: ['p5', 'default'],
-        include: ['**/*.js', '**/*.ts', '**/*.jsx', '**/*.tsx'],
-      }),
-    ],
+    ...astroAnimationsViteConfig(),
     resolve: {
       alias: {
-        '@sketches': path.resolve(__dirname, 'src/sketches'),
-        '@layouts': path.resolve(__dirname, 'src/layouts'),
-        '@styles': path.resolve(__dirname, 'src/styles'),
-        '@lib': path.resolve(__dirname, 'src/lib'),
-        '@components': path.resolve(__dirname, 'src/components'),
-        '@': path.resolve(__dirname, 'src'),
+        ...astroAnimationsViteAliases(),
+        '@sketches': '/src/sketches',
+        '@': '/src',
       },
     },
     css: {
       preprocessorOptions: {
         scss: {
+          additionalData: astroAnimationsScssPrepend(),
           silenceDeprecations: ['import', 'global-builtin'],
         },
       },

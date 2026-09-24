@@ -1,0 +1,142 @@
+# Capture — headless Chromium (Playwright) → per-frame R2 via @labcat2020/p5.audioreactive-capture-cli (labcat-capture)
+#
+# Workflow: test 100 → approve → full (audio length), no frames param for full, single orient per dispatch.
+#
+# Usage (founder approval between stages per PIPELINE.md):
+#   1) Test ~100 frames to temp R2 (founder reviews before full):
+#      dispatch with sketch=DonutsNo1 frames=100 orient=portrait r2Prefix=temp/DonutsNo1
+#      → uploads each frame to R2 as written (no ZIP). Review via https://images.labcat.nz/<r2Prefix>/portrait/index.html
+#   2) Founder reviews → full run after approval (audio-length default):
+#      dispatch with sketch=DonutsNo1 orient=portrait r2Prefix=captures/DonutsNo1  (omit --frames for full → audio duration @60fps)
+#      dispatch with sketch=DonutsNo1 orient=landscape r2Prefix=captures/DonutsNo1  (separate dispatch per orient)
+#
+# Invariants (additive over ZIP fallback):
+#   - No ?exporting flag, no Socket.io, no toDataURL wire, no frameRate(2) live loop
+#   - Capture is additive: sketch uses p.captureSkipDownload + captureOnFrame/window.__labcatOnFrameBlob → toBlob → R2 per frame
+#   - Explicit viewport per orient (portrait 1080×1920, landscape 1920×1080 via viewport.js)
+#   - ZIP fallback retained: p5.capture.js local PNG blobs → ZIP download still works in headed browser (not removed)
+#   - No sibling checkout, no preview URL — workflow builds inside its own repo (--repo .)
+#   - Dry-run fallback: if R2 secrets absent, --dry-run writes PNGs locally to capture-out/<sketch>-<orient>-<ts>/ + gallery index.html
+#
+# Env: R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET / R2_ACCOUNT_ID from secrets or vars.
+
+name: Capture
+
+on:
+  workflow_dispatch:
+    inputs:
+      sketch:
+        description: 'Sketch name or route id (e.g. DonutsNo1, DonutsNo2, number-1)'
+        required: true
+        type: string
+      frames:
+        description: 'Frames to capture (omit for full → audio-length @60fps; test: 100)'
+        required: false
+        default: ''
+        type: string
+      orient:
+        description: 'Orientation hint for single-orient test (full run uses both portrait+landscape matrix)'
+        required: false
+        default: portrait
+        type: choice
+        options: [portrait, landscape]
+      r2Prefix:
+        description: 'R2 key prefix (e.g. captures/DonutsNo1 or captures-test/2026-09-06/DonutsNo1-portrait)'
+        required: true
+        type: string
+      runId:
+        description: 'Optional Daruma run id (passthrough)'
+        required: false
+        default: ''
+        type: string
+      stageId:
+        description: 'Optional Daruma stage id (passthrough)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    # Single-orient per dispatch — dispatch once per orient (portrait 1080x1920, landscape 1920x1080).
+    # Full capture = two dispatches (portrait + landscape) -> https://images.labcat.nz/<prefix>/portrait/index.html etc.
+    env:
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET != '' && secrets.R2_BUCKET || vars.R2_BUCKET }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID != '' && secrets.R2_ACCOUNT_ID || vars.R2_ACCOUNT_ID }}
+      # Daruma passthrough (optional)
+      LABCAT_RUN_ID: ${{ inputs.runId }}
+      LABCAT_STAGE_ID: ${{ inputs.stageId }}
+    steps:
+      - name: Checkout self
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Show capture CLI help (sanity)
+        run: npx --yes @labcat2020/p5.audioreactive-capture-cli --help
+
+      - name: Capture ${{ inputs.sketch }} ${{ inputs.orient }} ${{ inputs.frames != '' && format('--frames {0}', inputs.frames) || '(full audio length)' }}
+        run: |
+          set -euo pipefail
+          # Normalize r2Prefix to base without trailing orient, then append selected orient.
+          # Handles both `temp/DonutsNo2` and `temp/DonutsNo2/portrait` inputs correctly.
+          R2_PREFIX_INPUT="${{ inputs.r2Prefix }}"
+          R2_PREFIX_BASE=$(echo "$R2_PREFIX_INPUT" | sed -E 's#/(portrait|landscape)$##')
+          R2_PREFIX="$R2_PREFIX_BASE/${{ inputs.orient }}"
+          echo "::group::Capture ${{ inputs.sketch }} ${{ inputs.orient }} frames=${{ inputs.frames || 'full' }} prefix=$R2_PREFIX (from input ${{ inputs.r2Prefix }})"
+
+          # --frames omission → full audio length @60fps (audio duration default). Pass --frames 100 only for test.
+          FRAMES_FLAG=""
+          if [ -n "${{ inputs.frames }}" ]; then
+            FRAMES_FLAG="--frames ${{ inputs.frames }}"
+          fi
+
+          # R2 creds from env (secrets/vars). If any missing, fall back to --dry-run (local capture-out/ + gallery).
+          DRY_RUN=""
+          if [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ] || [ -z "${R2_BUCKET:-}" ] || [ -z "${R2_ACCOUNT_ID:-}" ]; then
+            DRY_RUN="--dry-run"
+            echo "::notice::R2 creds missing — using --dry-run fallback to capture-out/ + gallery/index.html"
+          else
+            echo "R2 enabled: bucket=${R2_BUCKET} account=${R2_ACCOUNT_ID:0:4}… prefix=$R2_PREFIX"
+          fi
+
+          # Explicit viewport per orient via CLI's --orient; no sibling checkout, no preview URL — builds inside own repo (--repo .)
+          # Keep p5.capture.js ZIP fallback intact: CLI sets p.captureSkipDownload + captureOnFrame/window.__audioReactOnFrameBlob → toBlob → R2 (additive)
+          npx --yes @labcat2020/p5.audioreactive-capture-cli \
+            --repo . \
+            --sketch "${{ inputs.sketch }}" \
+            --orient "${{ inputs.orient }}" \
+            --r2-prefix "$R2_PREFIX" \
+            $FRAMES_FLAG $DRY_RUN
+
+          echo "::endgroup::"
+
+      - name: Upload capture-out artifact (dry-run / gallery)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-${{ inputs.sketch }}-${{ inputs.orient }}-${{ github.run_id }}
+          path: capture-out/
+          if-no-files-found: ignore
+          retention-days: 7

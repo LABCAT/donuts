@@ -1,16 +1,14 @@
 import p5 from 'p5';
-window.p5 = p5;
-import 'p5/lib/addons/p5.sound';
 import '@lib/p5.audioReact.js';
-import initCapture from '@lib/p5.capture.js';
-import '@lib/p5.polygon.js';
+import initCapture from '@labcat2020/p5.audioreactive-capture';
+import '@labcat2020/p5.polygon';
 import { Donut } from './classes/Donut.js';
 
 const base = import.meta.env.BASE_URL || './';
 const audio = base + 'audio/DonutsNo2.mp3';
 const midi = base + 'audio/DonutsNo2.mid';
 
-const DonutsNo2 = (p) => {
+const sketch = (p) => {
   p.song = null;
   p.fft = null;
   p.PPQ = 3840 * 4;
@@ -19,21 +17,7 @@ const DonutsNo2 = (p) => {
   p.centerDonuts = [];
   p.waveBursts = [];
 
-  p.preload = () => {
-    p.loadSong(audio, midi, (result) => {
-      const tColor = result.tracks[10];
-      const tSpikes = result.tracks[9];
-      const tArc = result.tracks[11];
-      const tGlyph = result.tracks[16];
-
-      if (tColor?.notes?.length) p.scheduleCueSet(tColor.notes, 'executeTrack1');
-      if (tSpikes?.notes?.length) p.scheduleCueSet(tSpikes.notes, 'executeTrack2');
-      if (tArc?.notes?.length) p.scheduleCueSet(tArc.notes, 'executeTrack3');
-      if (tGlyph?.notes?.length) p.scheduleCueSet(tGlyph.notes, 'executeTrack4');
-    });
-  };
-
-  p.setup = () => {
+  p.setup = async () => {
     p.pixelDensity(1);
     p.createCanvas(p.windowWidth, p.windowHeight);
     initCapture(p, {
@@ -44,11 +28,27 @@ const DonutsNo2 = (p) => {
     p.angleMode(p.DEGREES);
     p.rectMode(p.CENTER);
     p.colorMode(p.HSB, 360, 100, 100, 1);
-    p.fft = new p5.FFT();
     p.currentHue = 200;
     p.currentColorScheme = [];
     for (let h = 0; h < 360; h += 45) p.currentColorScheme.push(p.color(h, 80, 100));
     p.setComplementaryCanvasBg();
+
+    await p.loadSong(audio, midi, (result) => {
+      const tColor = result.tracks[10];
+      const tSpikes = result.tracks[9];
+      const tArc = result.tracks[11];
+      const tGlyph = result.tracks[16];
+
+      if (tColor?.notes?.length) p.scheduleCueSet(tColor.notes, 'executeTrack1');
+      if (tSpikes?.notes?.length) p.scheduleCueSet(tSpikes.notes, 'executeTrack2');
+      if (tArc?.notes?.length) p.scheduleCueSet(tArc.notes, 'executeTrack3');
+      if (tGlyph?.notes?.length) p.scheduleCueSet(tGlyph.notes, 'executeTrack4');
+    });
+
+    p.fft = new p5.FFT();
+    p.song.disconnect();
+    p.song.connect(p.fft);
+    p.fft.gain.toDestination();
   };
 
   p.draw = () => {
@@ -63,7 +63,7 @@ const DonutsNo2 = (p) => {
     p.blendMode(p.NORMAL);
 
     if (p.blackFade.active) {
-      const elapsed = p.song.currentTime() * 1000 - p.blackFade.startTime;
+      const elapsed = p.getSongPlaybackTime() * 1000 - p.blackFade.startTime;
       const progress = p.constrain(elapsed / p.blackFade.duration, 0, 1);
       const easedProgress = Math.pow(progress, 2);
       const opacity = 1 - easedProgress;
@@ -105,7 +105,7 @@ const DonutsNo2 = (p) => {
     }
 
     if (Array.isArray(p.waveBursts) && p.waveBursts.length > 0) {
-      const nowMs = p.song.currentTime() * 1000;
+      const nowMs = p.getSongPlaybackTime() * 1000;
       const stillActive = [];
       const burstHue = (hue + 40) % 360;
       for (const burst of p.waveBursts) {
@@ -214,7 +214,7 @@ const DonutsNo2 = (p) => {
     const { durationTicks } = note;
     const duration = (durationTicks / p.PPQ) * (60 / p.bpm);
     p.blackFade.active = true;
-    p.blackFade.startTime = p.song.currentTime() * 1000;
+    p.blackFade.startTime = p.getSongPlaybackTime() * 1000;
     p.blackFade.duration = duration * 1000;
     p.setComplementaryCanvasBg();
 
@@ -225,7 +225,7 @@ const DonutsNo2 = (p) => {
       (p.currentHue + 240) % 360,
     ];
     p.centerDonuts = [];
-    const nowMs = p.song.currentTime() * 1000;
+    const nowMs = p.getSongPlaybackTime() * 1000;
 
     for (let i = 0; i < 3; i++) {
       const sizeFactor = Math.pow(0.25, i);
@@ -251,7 +251,7 @@ const DonutsNo2 = (p) => {
     const x = p.random(-p.width / 2 + margin, p.width / 2 - margin);
     const y = p.random(-p.height / 2 + margin, p.height / 2 - margin);
     const scale = p.random(0.25, 0.6);
-    const nowMs = p.song.currentTime() * 1000;
+    const nowMs = p.getSongPlaybackTime() * 1000;
     p.waveBursts.push({
       x,
       y,
@@ -310,4 +310,4 @@ const DonutsNo2 = (p) => {
   p.mousePressed = () => p.togglePlayback();
 };
 
-export default DonutsNo2;
+new p5(sketch);

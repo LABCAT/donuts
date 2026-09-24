@@ -1,8 +1,9 @@
 ---
-import BaseLayout from '@layouts/BaseLayout.astro';
+import BaseLayout from '@labcat2020/animation-lab/layouts/BaseLayout.astro';
+import config from '@/project.config.js';
 ---
 
-<BaseLayout title="Donuts – Not found">
+<BaseLayout title="Donuts – Not found" gtmId={config.gtmId}>
   <h1>Error</h1>
   <p>Sorry, this page could not be found.</p>
 </BaseLayout>

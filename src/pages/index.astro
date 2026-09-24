@@ -1,11 +1,12 @@
 ---
-import BaseLayout from '@layouts/BaseLayout.astro';
+import BaseLayout from '@labcat2020/animation-lab/layouts/BaseLayout.astro';
 import { getAllSketches } from '@/sketchMetadata.js';
+import config from '@/project.config.js';
 
 const sketches = getAllSketches();
 ---
 
-<BaseLayout title="Donuts" description="Creative coding experiments.">
+<BaseLayout title="Donuts" description="Creative coding experiments." gtmId={config.gtmId}>
   <h1>Donuts</h1>
   <p>Creative coding experiments.</p>
   <h2>Available sketches</h2>
