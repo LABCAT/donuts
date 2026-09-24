@@ -1,8 +1,5 @@
 packages:
   - .
-  - ../../packages/*
-
-linkWorkspacePackages: true
 
 allowBuilds:
   '@parcel/watcher': true

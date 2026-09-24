@@ -1,5 +1,6 @@
 import p5 from 'p5';
 import '@lib/p5.audioReact.js';
+import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
 import '@labcat2020/p5.polygon';
 import { Donut } from './classes/Donut.js';
@@ -20,6 +21,14 @@ const sketch = (p) => {
   p.setup = async () => {
     p.pixelDensity(1);
     p.createCanvas(p.windowWidth, p.windowHeight);
+    // FPS badge — on by default, ?fps=0 to hide, F to toggle
+    const params = new URLSearchParams(window.location.search);
+    const wantsFps = !params.has('fps') || params.get('fps') !== '0';
+    if (wantsFps) p.enableFpsIndicator();
+    window.toggleFps = () => p.toggleFpsIndicator();
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
+    });
     initCapture(p, {
       prefix: 'DonutsNo2',
       enabled: false,
