@@ -38,6 +38,9 @@ const generateFullScreenGradient = (p, profile = 'base') => {
   // Per-session palette seed — keep hue family stable within a gradient so layers harmonize
   const hueSeed = p._triHueSeed ?? (p._triHueSeed = Math.floor(p.random(360)));
   const baseHue = avoidGreenHue((hueSeed + p.random(40) - 12 + 360) % 360, rng, 0.1);
+  // Exposed so sketches can key their palette off the live backdrop (DonutsNo3
+  // samples this at each call cycle and steps a fixed contrast off it).
+  p.fullScreenBaseHue = baseHue;
   const bright = p.random() < 0.5; // 'loud' biases toward the bright lift
   const boost = (bright ? 18 : 0) + gain.bri;
   const satBoost = (bright ? 12 : 0) + gain.sat;

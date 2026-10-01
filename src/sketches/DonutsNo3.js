@@ -102,16 +102,39 @@ const SNAP_SCALE = 0.12;
 
 // Per-donut jelly — each ring is pegged out/in with its own variation on every call cue
 // and springs back with its own phase, so the donuts bounce instead of riding the global
-// scale rigidly.
-const BOUNCE_K = 0.14;
-const BOUNCE_DAMP = 0.9;
-const BOUNCE_OUT = 0.3;
-const BOUNCE_IN = 0.32;
+// scale rigidly. Damping sits mid-jelly: loose enough for multi-cycle wobble, tight enough
+// that the figure never turns to soup.
+const BOUNCE_K = 0.11;
+const BOUNCE_DAMP = 0.84;
+const BOUNCE_OUT = 0.42;
+const BOUNCE_IN = 0.44;
 
 // Donut sizes are raw pixels like No1, so scale stroke weights off the short axis.
 const REF_UNIT = 540;
 
-// Ledger rule: same tune at another octave = same hue via pitch class, not a new colour.
+// The call keys off the live backdrop, not the chord: the phrase repeats the same voicing
+// every 9.6s cycle, so a pitch-derived key froze on one triad all track. Sampling the
+// gradient's exposed base hue at each cycle start (fresh per burst — the response re-rolls
+// the bg on every hit) and stepping a fixed contrast off it keeps the donuts apart from
+// the bed while tying the two together.
+const BG_CONTRAST = 160;
+
+// The response resolves onto a HERO — one huge ring breaking the frame, denser
+// and heavier than the scribble rings (ledger §5: opposing material). It grows over
+// the burst from small/faint to big/bright/bouncy, holds while the call stays quiet,
+// and dissolves the moment a punch lands. Never pitch-keyed (ledger §8).
+const HERO_R = 1.15; // fraction of unitR — breaks the frame (mandala outer edge sits ~0.92)
+const HERO_WEIGHT = 1.1;
+const HERO_QUIET = 0.6; // seconds of call silence before the hero may hold; a punch dissolves it
+const HERO_RATE = 6; // dissolve speed — the rise is driven by burst progress
+const HERO_SMOOTH = 4; // slow follow so each hit's step reads — growth lands per note
+const HERO_GROW_MIN = 0.04; // birth size as a fraction of full — near-zero to huge
+const HERO_PUNCH = 2.0; // slam out — 3x size, like the call's punch
+const HERO_SNAP = -0.95; // slam shut — x0.05, fully gone, like the call's snap
+const HERO_BOUNCE_DAMP = 0.78; // looser than the rings — long wobble tail
+// Hero key sits 40° off the backdrop on the opposite side from the mandala (+160),
+// so bed, mandala and hero read as three families.
+const HERO_CONTRAST = 320;
 const chordHue = (pitches) => {
   let sum = 0;
   for (const m of pitches) sum += (m % 12) * 30;
@@ -153,6 +176,8 @@ const sketch = (p) => {
   p.heroScale = 1;
   p.heroVel = 0;
   p.kickThump = 0;
+  p.heroProg = 0; // smoothed hero growth 0..1 — tracks burst progress
+  p.heroProgTarget = 0;
 
   // recipes/note-envelopes.md pattern — the response slams the overlay up to veil the
   // gradient swap, then it eases back DOWN to BASE_OVERLAY. It must not ease to ~0:
@@ -274,6 +299,33 @@ const sketch = (p) => {
     await p.loadSong(audio, midi, (data) => {
       p.callCues = groupByTicks(data.tracks[TRACK_CALL]?.notes);
       p.responseCues = groupByTicks(data.tracks[TRACK_RESPONSE]?.notes);
+      // Bursts are runs of cues less than BURST_GAP apart — precompute each cue's
+      // slot so the hero can track burst progress and stand fully revealed by the
+      // last hit.
+      p.responseBurstOf = (() => {
+        const ids = [];
+        let b = -1;
+        let prevT = -1e9;
+        p.responseCues.forEach((c) => {
+          if (c.time - prevT > BURST_GAP) b++;
+          ids.push(b);
+          prevT = c.time;
+        });
+        const pos = {};
+        const stamped = ids.map((burst) => {
+          const at = pos[burst] ?? 0;
+          pos[burst] = at + 1;
+          return { burst, pos: at, len: 0 };
+        });
+        const lens = {};
+        stamped.forEach((e) => {
+          lens[e.burst] = (lens[e.burst] || 0) + 1;
+        });
+        stamped.forEach((e) => {
+          e.len = lens[e.burst];
+        });
+        return stamped;
+      })();
       p.scheduleCueSet(p.callCues.length ? data.tracks[TRACK_CALL].notes : [], 'executeTrack5');
       p.scheduleCueSet(p.responseCues.length ? data.tracks[TRACK_RESPONSE].notes : [], 'executeTrack10');
     });
@@ -363,6 +415,24 @@ const sketch = (p) => {
       }
       p.mandala.layers.push(layer);
     }
+
+    // HERO — one big central ring, full-density scribble at heavy weight (the only
+    // "solid" on screen). Starts dark; drawMandala reveals it once flyers dissipate.
+    p.hero = p.buildDonut(
+      p.callCycleHue,
+      cx,
+      cy,
+      u * HERO_R,
+      HERO_WEIGHT * weightScale(),
+      1
+    );
+    p.hero.hueOffset = 0;
+    p.retintDonut(p.hero, p.callCycleHue);
+    p.hero.reveal = 0;
+    p.hero.targetReveal = 0;
+    p.hero.drawProgress = 0;
+    p.hero.bounce = 0;
+    p.hero.bounceVel = 0;
   };
 
   // Re-tint every element in place. Called once per call cycle so the mandala changes key
@@ -391,6 +461,11 @@ const sketch = (p) => {
       }
     }
     p.subDonuts = [];
+    if (p.hero) {
+      p.hero.reveal = 1;
+      p.hero.targetReveal = 1;
+      p.hero.drawProgress = 1;
+    }
     const u = unitR();
     for (let i = 0; i < 14; i++) {
       const ang = (i / 14) * p.TWO_PI + p.random(-0.1, 0.1);
@@ -468,9 +543,13 @@ const sketch = (p) => {
     const isNewCycle = cue.time - p.lastCallTime > BURST_GAP;
     if (isNewCycle) {
       p.callStep = 0;
-      // The mandala changes key with each 9.6s chord phrase. Without this the hues are
-      // frozen at the setup-time seed for the entire track.
-      p.callCycleHue = chordHue(cue.pitches);
+      // The mandala changes key with each 9.6s chord phrase — sampled off the live
+      // backdrop (contrast step) so it never sits on one hue all track. Falls back to
+      // the chord voicing before the first background has rolled.
+      const bgHue = p.fullScreenBaseHue;
+      p.callCycleHue = Number.isFinite(bgHue)
+        ? wrapHue(bgHue + BG_CONTRAST)
+        : chordHue(cue.pitches);
       p.retintMandala(p.callCycleHue);
     } else {
       p.callStep++;
@@ -533,12 +612,42 @@ const sketch = (p) => {
       for (const layer of p.mandala.layers) {
         for (const d of layer) d.targetReveal = 0;
       }
+      // Fresh growth for the new burst — the first hit starts it small.
+      p.heroProg = 0;
+      p.heroProgTarget = 0;
+      // New hue family for the burst — the gradient seed is session-stable, which
+      // froze every phrase on cousin colours. Reseeding moves the whole scene
+      // (bg rolls, call key, hero key) to a fresh family per burst.
+      p._triHueSeed = Math.floor(p.random(360));
+      // Reshuffle the hero scribble so the texture itself varies per burst.
+      if (p.hero) p.hero.initDrawProgress();
     }
     const stepIdx = p.responseStep % RESPONSE_PATTERNS.length;
     p.responseStep++;
     p.spawnResponsePattern(RESPONSE_PATTERNS[stepIdx]);
     console.log('[Track10] hit=' + note.currentCue + ' t=' + time.toFixed(2) + 's shows ' + RESPONSE_PATTERN_NAMES[stepIdx]);
+    // The hero grows over the burst — each hit advances the growth target (eased
+    // per-frame into continuous growth) and re-pegs its spring so it wobbles.
+    const bi = p.responseBurstOf[idx];
+    if (bi && p.hero) {
+      p.heroProgTarget = Math.min(1, (bi.pos + 1) / Math.max(1, bi.len));
+      p.hero.targetReveal = 1;
+      // Punch/snap pairs like the call — alternate hits slam fully out then
+      // fully shut, spring overshoot does the rest.
+      p.hero.bounce = bi.pos % 2 === 0 ? HERO_PUNCH : HERO_SNAP;
+      p.hero.bounceVel = 0;
+    }
     randomizeFullScreenBg(p);
+    // The hero takes the fresh backdrop's key (contrast side, never pitch — the riff
+    // repeats every cycle so a pitch key froze on one colour all track).
+    if (isBurstStart && p.hero) {
+      const freshBg = p.fullScreenBaseHue;
+      const heroHue = Number.isFinite(freshBg)
+        ? wrapHue(freshBg + HERO_CONTRAST)
+        : chordHue(cue?.pitches ?? []);
+      p.retintDonut(p.hero, heroHue);
+      p.buildHalo(p.hero, heroHue);
+    }
 
     const e = p.fullScreenEnvelope;
     e.active = true;
@@ -590,6 +699,48 @@ const sketch = (p) => {
         d.update();
         const w = MANDALA_WEIGHT * weightScale() * kick;
         p.drawWithHalo(d, w, w * HALO_WEIGHT);
+      }
+    }
+
+    // HERO hold + dissolve + growth — hits advance the growth target (eased here
+    // into continuous small-to-big), so here only decides hold vs dissolve: hold
+    // while the call stays quiet past HERO_QUIET, dissolve the moment a punch lands.
+    const h = p.hero;
+    if (h) {
+      const songT = p.getSongPlaybackTime?.() ?? 0;
+      const sinceCall = songT - (p.lastCallTime ?? -99);
+      let flyers = 0;
+      for (const d of p.subDonuts) {
+        if (d.fastFade && d.age < FAST_LIFE) flyers++;
+      }
+      const hTarget =
+        p.responseStep > 0 && sinceCall > HERO_QUIET ? 1 : 0;
+      if (hTarget !== h.targetReveal) {
+        console.log('[Hero] ' + (hTarget ? 'RISE' : 'fall') + ' t=' + songT.toFixed(2) + 's flyers=' + flyers + ' sinceCall=' + sinceCall.toFixed(2) + 's reveal=' + h.reveal.toFixed(2));
+      }
+      h.targetReveal = hTarget;
+      h.reveal += (hTarget - h.reveal) * (1 - Math.exp(-dt * HERO_RATE));
+      // Growth eases toward the burst target (collapses on dissolve); the hero's own
+      // spring runs every frame so newly bounced rings are mid-wobble.
+      p.heroProg +=
+        ((hTarget > 0 ? p.heroProgTarget : 0) - p.heroProg) *
+        (1 - Math.exp(-dt * HERO_SMOOTH));
+      h.bounceVel += (0 - h.bounce) * BOUNCE_K;
+      h.bounceVel *= HERO_BOUNCE_DAMP;
+      h.bounce = p.constrain(h.bounce + h.bounceVel, -1.0, 2.0);
+      // Linear growth — every hit adds an equal visible step instead of rushing
+      // most of it early like an ease-out would.
+      // Small + faint (sparse thin elements) grows into big + bright (full heavy ring).
+      const grow =
+        HERO_GROW_MIN + (1 - HERO_GROW_MIN) * Math.max(0, Math.min(1, p.heroProg));
+      if (h.reveal >= 0.004 || hTarget > 0) {
+        h.drawProgress = h.reveal * grow;
+        const hr = h.baseMax * grow * s * (1 + h.bounce);
+        h.minSize = hr;
+        h.maxSize = hr;
+        h.update();
+        const hw = HERO_WEIGHT * weightScale() * kick * (0.35 + 0.65 * grow) * (1 + h.bounce * 0.4);
+        p.drawWithHalo(h, hw, hw * HALO_WEIGHT);
       }
     }
   };
@@ -669,6 +820,15 @@ const sketch = (p) => {
     if (p.audioLoaded && p.song?.isPlaying()) {
       p.subDonuts = [];
       p.mandala.lit = 0;
+      if (p.hero) {
+        p.hero.reveal = 0;
+        p.hero.targetReveal = 0;
+        p.hero.drawProgress = 0;
+        p.hero.bounce = 0;
+        p.hero.bounceVel = 0;
+      }
+      p.heroProg = 0;
+      p.heroProgTarget = 0;
       for (const layer of p.mandala.layers) {
         for (const d of layer) {
           d.reveal = 0;
