@@ -129,9 +129,15 @@ const HERO_QUIET = 0.6; // seconds of call silence before the hero may hold; a p
 const HERO_RATE = 6; // dissolve speed — the rise is driven by burst progress
 const HERO_SMOOTH = 4; // slow follow so each hit's step reads — growth lands per note
 const HERO_GROW_MIN = 0.04; // birth size as a fraction of full — near-zero to huge
-const HERO_PUNCH = 2.0; // slam out — 3x size, like the call's punch
-const HERO_SNAP = -0.95; // slam shut — x0.05, fully gone, like the call's snap
-const HERO_BOUNCE_DAMP = 0.78; // looser than the rings — long wobble tail
+const HERO_PUNCH = 2.6; // slam out — far past full, so the recoil swings all the way back in
+const HERO_SNAP = -1.1; // slam shut — past the floor, so the peg itself bottoms out
+const HERO_BOUNCE_K = 0.2; // stiff restoring force — fast, visible jelly cycles
+const HERO_BOUNCE_DAMP = 0.92; // barely damped — it overshoots hard and wobbles for a long tail
+// Scribble density is its own spring axis: as the hero bounces in, it sheds outlines
+// down to a sparse skeleton — just a few of the primitive shapes the ring is built from —
+// then slams back to the whole donut on the way out. This is the drawProgress axis
+// (Donut.draw draws floor(elements * drawProgress) outlines), not opacity.
+const HERO_SCRIBBLE_MIN = 0.05; // fewest primitives still visible while bounced fully in
 // Hero key sits 40° off the backdrop on the opposite side from the mandala (+160),
 // so bed, mandala and hero read as three families.
 const HERO_CONTRAST = 320;
@@ -344,6 +350,18 @@ const sketch = (p) => {
   };
 
   p.drawWithHalo = (d, bodyWeight, haloWeight) => {
+    // Conservative frustum cull: nothing can land on canvas if the whole scribble is off
+    // it. Bounds each primitive as if it reached (20 + size) * 1.5 from the centre, which
+    // covers the offset (0, 20) plus the worst-case rect-corner extent, plus stroke width.
+    const reach = (20 + d.size + 4) * 1.5 + Math.max(bodyWeight, haloWeight);
+    if (
+      d.x + reach < 0 ||
+      d.x - reach > p.width ||
+      d.y + reach < 0 ||
+      d.y - reach > p.height
+    ) {
+      return;
+    }
     const full = d.drawElements;
     d.drawElements = d.haloElements;
     d.strokeWeight = haloWeight;
@@ -444,6 +462,7 @@ const sketch = (p) => {
       el.baseColour = p.color(hue, 90, bri);
       el.colour = el.baseColour;
     }
+    d.uniformColour = true;
   };
 
   p.retintMandala = (cycleHue) => {
@@ -725,16 +744,22 @@ const sketch = (p) => {
       p.heroProg +=
         ((hTarget > 0 ? p.heroProgTarget : 0) - p.heroProg) *
         (1 - Math.exp(-dt * HERO_SMOOTH));
-      h.bounceVel += (0 - h.bounce) * BOUNCE_K;
+      h.bounceVel += (0 - h.bounce) * HERO_BOUNCE_K;
       h.bounceVel *= HERO_BOUNCE_DAMP;
-      h.bounce = p.constrain(h.bounce + h.bounceVel, -1.0, 2.0);
+      // Floor at -1.0 (size reaches zero) but let the punch peg go far above, so the spring
+      // overshoots through full-in on the recoil instead of easing gently to rest.
+      h.bounce = p.constrain(h.bounce + h.bounceVel, -1.0, 2.6);
       // Linear growth — every hit adds an equal visible step instead of rushing
       // most of it early like an ease-out would.
       // Small + faint (sparse thin elements) grows into big + bright (full heavy ring).
       const grow =
         HERO_GROW_MIN + (1 - HERO_GROW_MIN) * Math.max(0, Math.min(1, p.heroProg));
       if (h.reveal >= 0.004 || hTarget > 0) {
-        h.drawProgress = h.reveal * grow;
+        // Bounce drives the outline count as well as the size: a snap sheds the ring back
+        // to a sparse skeleton (a handful of primitives), a punch slams the whole scribble
+        // back on. The spring's wobble makes it bounce in and out of that state per hit.
+        const scribble = p.constrain(1 + h.bounce, HERO_SCRIBBLE_MIN, 1);
+        h.drawProgress = h.reveal * grow * scribble;
         const hr = h.baseMax * grow * s * (1 + h.bounce);
         h.minSize = hr;
         h.maxSize = hr;

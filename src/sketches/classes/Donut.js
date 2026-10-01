@@ -34,6 +34,9 @@ export class Donut {
         // Increase the likelihood of using a fixed color for the whole donut (e.g., 80% chance)
         this.useFixedColour = this.p.random() < 0.8; // 80% chance
         this.fixedColour = this.p.random(this.p.currentColorScheme);
+        // Every outline shares one colour — lets draw() set the stroke once instead of
+        // per element. retintDonut() forces this true; per-element flyers keep it false.
+        this.uniformColour = this.useFixedColour;
 
         // Create draw elements array - only the main drawing loops
         this.drawElements = [];
@@ -89,14 +92,24 @@ export class Donut {
     draw() {
         this.updateDrawProgress();
         
-        // Setup (always happens)
-        this.p.translate(this.x, this.y); 
-        this.p.noFill();
-        
         // Main drawing loops with progress control
         const elementsToShow = this.drawProgressEnabled ? 
             Math.floor(this.drawElements.length * this.drawProgress) : 
             this.drawElements.length;
+        
+        // Nothing to paint — skip the transform churn entirely (no pixels either way).
+        if (elementsToShow <= 0) return;
+        
+        // Setup (always happens)
+        this.p.translate(this.x, this.y); 
+        this.p.noFill();
+        
+        // Uniform-coloured donuts (the common case after retintDonut / for halos) set the
+        // stroke once instead of per outline — same colour, same order, identical pixels.
+        if (this.uniformColour) {
+            this.p.stroke(this.drawElements[0].colour);
+            this.p.strokeWeight(this.strokeWeight);
+        }
         
         for (let i = 0; i < elementsToShow; i++) {
             const element = this.drawElements[i];
@@ -104,8 +117,10 @@ export class Donut {
             // Apply randomized rotation for this element
             this.p.push();
             this.p.rotate(element.rotationOffset);
-            this.p.stroke(element.colour);
-            this.p.strokeWeight(this.strokeWeight);
+            if (!this.uniformColour) {
+                this.p.stroke(element.colour);
+                this.p.strokeWeight(this.strokeWeight);
+            }
             const shapeSize = this.size + element.size;
             this.p[this.shape](0, 20, shapeSize, shapeSize);
             this.p.pop();
