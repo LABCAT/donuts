@@ -18,14 +18,15 @@ const audio = base + 'audio/DonutsNo3.mp3';
 const midi = base + 'audio/DonutsNo3.mid';
 
 // Track map, read off DonutsNo3.mid (12 tracks, ppq 15360, 150bpm, 57.6s = 6 x 9.6s cycles).
+//   trk 3  Sampler 2          197 notes          — chord stabs 28.8s→53.4s = the VEIL (fade to black)
 //   trk 5  House Bass Layer   398 notes 113 cues — steady 0.3s grid, 18 cues a cycle = the CALL
 //   trk 10 House Bass Layer 2 198 notes  54 cues — 9-cue riff bursts = the RESPONSE
 //   trk 9  Pop Kit 1          336 notes          — funky kit, ghost 16ths = the bounce
+const TRACK_DARK = 3;
 const TRACK_CALL = 5;
 const TRACK_RESPONSE = 10;
 // Response rotation: pattern 1 (centre), then 4 (centre+middle), then 7 (full), repeating.
 const RESPONSE_PATTERNS = [0b001, 0b011, 0b111];
-const RESPONSE_PATTERN_NAMES = ['centre', 'centre + middle', 'full'];
 
 const PPQ = 15360;
 const BPM = 150;
@@ -57,7 +58,6 @@ const LAYER_ANGLES = [
 // lone lit layer rendered as one flat colour instead of distinct donuts.
 const LAYER_HUE_OFFSET = [0, 118, 242]; // triad — layer centres
 const LAYER_HUE_SPREAD = 90; // per-donut spread inside a layer; the bands stay ~30° apart
-const LAYER_NAMES = ['centre', 'middle', 'outer'];
 const MANDALA_WEIGHT = 1.2;
 
 // A donut grows out of its layer as that layer reveals, which is the pop the earlier
@@ -90,6 +90,16 @@ const HALO_BRI = 7; // near-black, but keeps a trace of hue so it reads as shado
 const MANDALA_SUBSAMPLE = 2; // 13 donuts are on screen at once — halve each scribble
 const SUB_BODY_SUBSAMPLE = 3; // fragments are small and numerous — thin theirs right down
 const BASE_OVERLAY = 0.45; // black veil over the gradient; donuts need a dark bed to read
+
+// Sampler 2 (trk 3) veil — reverse of GlyphsNo1's blackFade (recipes/black-fade.md):
+// every note snaps the veil open and quadratic-eases it INTO black over that note's own
+// duration, so the darkness punches with each stab. DARK_HOLD pads past the cue's length
+// so the 0.15-0.75s gaps between stabs never start opening it again — only the long 4.2s
+// hole and the outro breathe it back (DARK_OUT_RATE ≈ 2s; DARK_IN_RATE is the safety
+// ramp for a cue that lands while the veil is still part-way open).
+const DARK_IN_RATE = 0.45;
+const DARK_OUT_RATE = 1.1;
+const DARK_HOLD = 1.2;
 
 // Hits drive the scale directly — punch pegs it high, snap ducks it near-zero — and the
 // under-damped spring (~0.3s period) shapes the recovery with overshoot. Pegging means
@@ -130,14 +140,16 @@ const HERO_RATE = 6; // dissolve speed — the rise is driven by burst progress
 const HERO_SMOOTH = 4; // slow follow so each hit's step reads — growth lands per note
 const HERO_GROW_MIN = 0.04; // birth size as a fraction of full — near-zero to huge
 const HERO_PUNCH = 2.6; // slam out — far past full, so the recoil swings all the way back in
-const HERO_SNAP = -1.1; // slam shut — past the floor, so the peg itself bottoms out
-const HERO_BOUNCE_K = 0.2; // stiff restoring force — fast, visible jelly cycles
-const HERO_BOUNCE_DAMP = 0.92; // barely damped — it overshoots hard and wobbles for a long tail
+const HERO_SNAP = -1.6; // slam shut — way past the floor, so the recoil is violent
+const HERO_BOUNCE_K = 0.22; // stiff restoring force — fast, snappy jelly cycles
+const HERO_BOUNCE_DAMP = 0.95; // hardly damped — it overshoots hard and rings for a long tail
 // Scribble density is its own spring axis: as the hero bounces in, it sheds outlines
 // down to a sparse skeleton — just a few of the primitive shapes the ring is built from —
 // then slams back to the whole donut on the way out. This is the drawProgress axis
 // (Donut.draw draws floor(elements * drawProgress) outlines), not opacity.
-const HERO_SCRIBBLE_MIN = 0.05; // fewest primitives still visible while bounced fully in
+const HERO_SCRIBBLE_GAIN = 1.8; // negative bounce collapses to the skeleton far faster than size
+const HERO_SCRIBBLE_MIN = 0.02; // fewest primitives still visible while bounced fully in
+const HERO_MIN_SIZE = 0.05; // size floor — the stripped-back primitive cluster never vanishes
 // Hero key sits 40° off the backdrop on the opposite side from the mandala (+160),
 // so bed, mandala and hero read as three families.
 const HERO_CONTRAST = 320;
@@ -147,20 +159,10 @@ const chordHue = (pitches) => {
   return (sum / Math.max(1, pitches.length)) % 360;
 };
 
-// Plain-English hue names for the founder log — boundaries are approximate.
-const hueName = (h) => {
-  const hue = ((h % 360) + 360) % 360;
-  if (hue < 18 || hue >= 342) return 'red';
-  if (hue < 45) return 'orange';
-  if (hue < 75) return 'yellow';
-  if (hue < 155) return 'green';
-  if (hue < 185) return 'teal';
-  if (hue < 255) return 'blue';
-  if (hue < 290) return 'violet';
-  return 'magenta';
-};
-
 const sketch = (p) => {
+  // Always loop: when the song ends, the lib's onended → _restartSongPlayback()
+  // replays from 0 (and calls p.resetAnimation first). ARA skill mandates this.
+  p.loopAudio = true;
   p.song = null;
   p.PPQ = PPQ;
   p.bpm = BPM;
@@ -186,17 +188,25 @@ const sketch = (p) => {
   p.heroProgTarget = 0;
 
   // recipes/note-envelopes.md pattern — the response slams the overlay up to veil the
-  // gradient swap, then it eases back DOWN to BASE_OVERLAY. It must not ease to ~0:
-  // deactivating the envelope leaves the overlay wherever it landed, so an endVal near
-  // zero silently strips the base veil for the rest of the track.
+  // gradient swap, then it eases back to the CURRENT veil base (darkBase in draw:
+  // BASE_OVERLAY normally, climbing toward full black while Sampler 2 fires). The base is
+  // always > 0, so deactivating the envelope can never strip the veil.
   p.fullScreenEnvelope = {
     active: false,
     startTime: 0,
     duration: 0,
     startVal: 0.95,
-    endVal: BASE_OVERLAY,
     hold: 0.14,
   };
+
+  // Sampler 2's veil state — p.darkFade is the per-note envelope (restarts on every
+  // stab); p.dark is the current blackness 0..1; p.darkUntil is the song-seconds window
+  // the latest cue holds it shut.
+  p.dark = 0;
+  p.darkTarget = 0;
+  p.darkUntil = 0;
+  p.darkFade = { active: false, startTime: 0, duration: 0 };
+  p.darkLastVoicing = null;
 
   // ---------------------------------------------------------------- cue tables
 
@@ -305,6 +315,7 @@ const sketch = (p) => {
     await p.loadSong(audio, midi, (data) => {
       p.callCues = groupByTicks(data.tracks[TRACK_CALL]?.notes);
       p.responseCues = groupByTicks(data.tracks[TRACK_RESPONSE]?.notes);
+      p.darkCues = groupByTicks(data.tracks[TRACK_DARK]?.notes);
       // Bursts are runs of cues less than BURST_GAP apart — precompute each cue's
       // slot so the hero can track burst progress and stand fully revealed by the
       // last hit.
@@ -334,6 +345,7 @@ const sketch = (p) => {
       })();
       p.scheduleCueSet(p.callCues.length ? data.tracks[TRACK_CALL].notes : [], 'executeTrack5');
       p.scheduleCueSet(p.responseCues.length ? data.tracks[TRACK_RESPONSE].notes : [], 'executeTrack10');
+      p.scheduleCueSet(p.darkCues.length ? data.tracks[TRACK_DARK].notes : [], 'executeTrack3');
     });
   };
 
@@ -551,6 +563,31 @@ const sketch = (p) => {
 
   // ---------------------------------------------------------------- cue handlers
 
+  // TRACK 3 — Sampler 2, chord stabs from the halfway point (28.8s → 53.4s). Every note
+  // runs the reverse of GlyphsNo1's blackFade (recipes/black-fade.md): snap the veil open,
+  // quadratic-ease it into black over the note, hold while cues keep firing, breathe open
+  // once they stop (only the 4.2s hole and the outro win).
+  p.executeTrack3 = (note) => {
+    const cue = p.darkCues[(note.currentCue || 1) - 1];
+    if (!cue) return;
+    // The arrangement re-hammers the SAME chord every 0.3s grid step while the render
+    // holds it — the ear hears one note, so one fade. Only a real voicing change triggers.
+    const voicing = cue.pitches.join(',');
+    if (voicing === p.darkLastVoicing) return;
+    p.darkLastVoicing = voicing;
+    const durSec = cueSeconds(cue.durationTicks);
+    console.log(
+      `[Track3] cue=${note.currentCue}/${p.darkCues.length} t=${cue.time.toFixed(2)}s ` +
+        `dur=${durSec.toFixed(2)}s pitches=[${cue.pitches.join(',')}]`
+    );
+    p.darkFade = {
+      active: true,
+      startTime: p.getSongPlaybackTime() * 1000,
+      duration: Math.max(100, durSec * 1000),
+    };
+    p.darkUntil = cue.time + durSec + DARK_HOLD;
+  };
+
   // TRACK 5 — house bass call. Each PUNCH picks one of the 7 non-empty subsets of the 3
   // mandala layers and lights it, and the figure then HOLDS for the punch-snap pair —
   // re-rolling on every 0.3s cue reconfigured the whole figure 3.3×/s, which read as
@@ -598,15 +635,6 @@ const sketch = (p) => {
       d.bounce = (isPunch ? BOUNCE_OUT : -BOUNCE_IN) * p.random(0.6, 1.4);
       d.bounceVel = 0;
     }
-
-    // Founder-visible heartbeat: say out loud which rings are lit and what colour each
-    // is, so hits can be matched to the figure on screen without decoding anything.
-    const litNames = [];
-    for (let li = 0; li < 3; li++) {
-      const on = (p.mandala.lit >> li) & 1;
-      if (on) litNames.push(LAYER_NAMES[li] + ' ' + hueName(p.callCycleHue + LAYER_HUE_OFFSET[li]));
-    }
-    console.log('[Track5] cue=' + note.currentCue + ' t=' + cue.time.toFixed(2) + 's ' + (isPunch ? 'PUNCH shows ' : 'snap holds ') + (litNames.length ? litNames.join(' + ') : 'dark'));
   };
 
   // RESPONSE — 9-cue riff burst. The gradient is swapped on EVERY hit, not just the first:
@@ -644,7 +672,6 @@ const sketch = (p) => {
     const stepIdx = p.responseStep % RESPONSE_PATTERNS.length;
     p.responseStep++;
     p.spawnResponsePattern(RESPONSE_PATTERNS[stepIdx]);
-    console.log('[Track10] hit=' + note.currentCue + ' t=' + time.toFixed(2) + 's shows ' + RESPONSE_PATTERN_NAMES[stepIdx]);
     // The hero grows over the burst — each hit advances the growth target (eased
     // per-frame into continuous growth) and re-pegs its spring so it wobbles.
     const bi = p.responseBurstOf[idx];
@@ -684,7 +711,6 @@ const sketch = (p) => {
       e.startVal = 0.82;
       e.hold = 0.06;
     }
-    e.endVal = BASE_OVERLAY;
     // Mask the swap on the very next painted frame, not the one after.
     setFullScreenOverlayOpacity(p, e.startVal);
 
@@ -728,15 +754,8 @@ const sketch = (p) => {
     if (h) {
       const songT = p.getSongPlaybackTime?.() ?? 0;
       const sinceCall = songT - (p.lastCallTime ?? -99);
-      let flyers = 0;
-      for (const d of p.subDonuts) {
-        if (d.fastFade && d.age < FAST_LIFE) flyers++;
-      }
       const hTarget =
         p.responseStep > 0 && sinceCall > HERO_QUIET ? 1 : 0;
-      if (hTarget !== h.targetReveal) {
-        console.log('[Hero] ' + (hTarget ? 'RISE' : 'fall') + ' t=' + songT.toFixed(2) + 's flyers=' + flyers + ' sinceCall=' + sinceCall.toFixed(2) + 's reveal=' + h.reveal.toFixed(2));
-      }
       h.targetReveal = hTarget;
       h.reveal += (hTarget - h.reveal) * (1 - Math.exp(-dt * HERO_RATE));
       // Growth eases toward the burst target (collapses on dissolve); the hero's own
@@ -746,25 +765,37 @@ const sketch = (p) => {
         (1 - Math.exp(-dt * HERO_SMOOTH));
       h.bounceVel += (0 - h.bounce) * HERO_BOUNCE_K;
       h.bounceVel *= HERO_BOUNCE_DAMP;
-      // Floor at -1.0 (size reaches zero) but let the punch peg go far above, so the spring
-      // overshoots through full-in on the recoil instead of easing gently to rest.
-      h.bounce = p.constrain(h.bounce + h.bounceVel, -1.0, 2.6);
+      // Deep negative floor: the peg and the overshoot are both allowed well past the size
+      // zero point, so the ring rings through full-in instead of easing gently to rest.
+      // Size and weight below apply their own floors, so nothing renders inverted.
+      h.bounce = p.constrain(h.bounce + h.bounceVel, -2.2, 2.8);
       // Linear growth — every hit adds an equal visible step instead of rushing
       // most of it early like an ease-out would.
       // Small + faint (sparse thin elements) grows into big + bright (full heavy ring).
       const grow =
         HERO_GROW_MIN + (1 - HERO_GROW_MIN) * Math.max(0, Math.min(1, p.heroProg));
       if (h.reveal >= 0.004 || hTarget > 0) {
-        // Bounce drives the outline count as well as the size: a snap sheds the ring back
+        // Bounce drives the outline count as well as the size: a snap strips the ring back
         // to a sparse skeleton (a handful of primitives), a punch slams the whole scribble
-        // back on. The spring's wobble makes it bounce in and out of that state per hit.
-        const scribble = p.constrain(1 + h.bounce, HERO_SCRIBBLE_MIN, 1);
+        // back on. The scribble gain collapses the outline count faster than the size, so
+        // the ring reads as "small + bare primitives" for most of the inward swing.
+        const scribble = p.constrain(
+          1 + h.bounce * HERO_SCRIBBLE_GAIN,
+          HERO_SCRIBBLE_MIN,
+          1
+        );
         h.drawProgress = h.reveal * grow * scribble;
-        const hr = h.baseMax * grow * s * (1 + h.bounce);
+        const hr =
+          h.baseMax * grow * s * Math.max(HERO_MIN_SIZE, 1 + h.bounce);
         h.minSize = hr;
         h.maxSize = hr;
         h.update();
-        const hw = HERO_WEIGHT * weightScale() * kick * (0.35 + 0.65 * grow) * (1 + h.bounce * 0.4);
+        const hw =
+          HERO_WEIGHT *
+          weightScale() *
+          kick *
+          (0.35 + 0.65 * grow) *
+          Math.max(0.15, 1 + h.bounce * 0.4);
         p.drawWithHalo(h, hw, hw * HALO_WEIGHT);
       }
     }
@@ -807,9 +838,28 @@ const sketch = (p) => {
 
     if (!((p.audioLoaded && p.song.isPlaying()) || p.songHasFinished)) return;
 
+    // Sampler 2 veil — reverse of GlyphsNo1's blackFade (recipes/black-fade.md): every
+    // note snaps the veil open and eases it INTO black over the note's own duration.
+    const songT = p.getSongPlaybackTime?.() ?? 0;
+    const nowMs = songT * 1000;
+    p.darkTarget = songT < p.darkUntil ? 1 : 0;
+    if (p.darkFade.active) {
+      const progress = p.constrain(
+        (nowMs - p.darkFade.startTime) / (p.darkFade.duration || 1),
+        0,
+        1
+      );
+      p.dark = Math.pow(progress, 2); // mirror of GlyphsNo1's 1 - pow(progress, 2)
+      if (progress >= 1) p.darkFade.active = false; // holds at black until cues stop
+    } else {
+      // Hold black while the stabs keep firing; breathe open through the hole/outro.
+      const darkRate = p.darkTarget > p.dark ? DARK_IN_RATE : DARK_OUT_RATE;
+      p.dark += (p.darkTarget - p.dark) * (1 - Math.exp(-dt * darkRate));
+    }
+    const darkBase = p.lerp(BASE_OVERLAY, 1, p.dark);
+
     // Gradient envelope — the response veils the gradient swap, then returns to base
     if (p.fullScreenEnvelope.active) {
-      const nowMs = (p.getSongPlaybackTime?.() ?? 0) * 1000;
       const e = p.fullScreenEnvelope;
       const progress = p.constrain((nowMs - e.startTime) / (e.duration || 1), 0, 1);
       let val;
@@ -817,10 +867,13 @@ const sketch = (p) => {
         val = e.startVal;
       } else {
         const t = (progress - e.hold) / Math.max(1e-6, 1 - e.hold);
-        val = p.lerp(e.startVal, e.endVal, 1 - Math.pow(1 - t, 4));
+        val = p.lerp(e.startVal, darkBase, 1 - Math.pow(1 - t, 4));
       }
       setFullScreenOverlayOpacity(p, val);
       if (progress >= 1) p.fullScreenEnvelope.active = false;
+    } else {
+      // Between flashes the veil rides the sampler's own fade.
+      setFullScreenOverlayOpacity(p, darkBase);
     }
 
     // --- spring + decay. Scale is the drums' and the call's shared axis.
@@ -840,31 +893,50 @@ const sketch = (p) => {
     p.pop();
   };
 
+  // Per-pass state clear — _restartSongPlayback() calls this before replaying from 0
+  // (loopAudio end, or clicking at the end), so every restart begins on a clean slate.
+  // Without it: stale lastCallTime/lastResponseTime make the first cues of the new pass
+  // continue the old cycle instead of starting a fresh one, and stale envelopes/blackout
+  // pin the veil (their startTime sits in the future of the fresh pass).
+  p.resetAnimation = () => {
+    p.subDonuts = [];
+    p.mandala.lit = 0;
+    if (p.hero) {
+      p.hero.reveal = 0;
+      p.hero.targetReveal = 0;
+      p.hero.drawProgress = 0;
+      p.hero.bounce = 0;
+      p.hero.bounceVel = 0;
+    }
+    p.heroProg = 0;
+    p.heroProgTarget = 0;
+    for (const layer of p.mandala.layers) {
+      for (const d of layer) {
+        d.reveal = 0;
+        d.drawProgress = 0;
+        d.targetReveal = 0;
+      }
+    }
+    p.heroScale = 1;
+    p.heroVel = 0;
+    p.kickThump = 0;
+    p.callStep = 0;
+    p.responseStep = 0;
+    p.lastCallTime = -99;
+    p.lastResponseTime = -99;
+    // Sampler 2's blackout must not leak into the new pass.
+    p.dark = 0;
+    p.darkTarget = 0;
+    p.darkUntil = 0;
+    p.darkFade.active = false;
+    p.darkLastVoicing = null;
+    p.fullScreenEnvelope.active = false;
+  };
+
   p.mousePressed = () => {
     p.togglePlayback();
     if (p.audioLoaded && p.song?.isPlaying()) {
-      p.subDonuts = [];
-      p.mandala.lit = 0;
-      if (p.hero) {
-        p.hero.reveal = 0;
-        p.hero.targetReveal = 0;
-        p.hero.drawProgress = 0;
-        p.hero.bounce = 0;
-        p.hero.bounceVel = 0;
-      }
-      p.heroProg = 0;
-      p.heroProgTarget = 0;
-      for (const layer of p.mandala.layers) {
-        for (const d of layer) {
-          d.reveal = 0;
-          d.drawProgress = 0;
-          d.targetReveal = 0;
-        }
-      }
-      p.heroScale = 1;
-      p.heroVel = 0;
-      p.callStep = 0;
-      p.responseStep = 0;
+      p.resetAnimation();
       p.showingStatic = false;
       p.loop();
     }
