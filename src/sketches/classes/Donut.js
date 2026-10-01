@@ -89,43 +89,127 @@ export class Donut {
         this.hue = this.hue > 360 ? 0 : this.hue++;
     }
 
+    // Exact canvas path for one outline at (0, 20), matching what p5 builds for it. p5
+    // rebuilds this — a Vector per vertex, a Shape, a converter and a fresh Path2D — for
+    // every single outline, which is the bulk of the frame cost at thousands of outlines.
+    // Only valid for ellipseMode/rectMode CENTER (all Donuts sketches use CENTER).
+    _buildPath(shapeSize) {
+        const half = shapeSize / 2;
+        const path = new Path2D();
+        switch (this.shape) {
+            case 'ellipse':
+                // ellipseMode CENTER: centred at (0, 20), not corner-anchored.
+                path.ellipse(0, 20, half, half, 0, 0, Math.PI * 2);
+                path.closePath();
+                break;
+            case 'rect':
+                path.rect(-half, 20 - half, shapeSize, shapeSize);
+                break;
+            case 'equilateral':
+                this._polygonPath(path, half, 3, -Math.PI / 2);
+                break;
+            case 'pentagon':
+                this._polygonPath(path, half, 5, -Math.PI / 2);
+                break;
+            case 'hexagon':
+                this._polygonPath(path, half, 6, 0);
+                break;
+            case 'octagon':
+                this._polygonPath(path, half, 8, (Math.PI * 2) / 16);
+                break;
+            default:
+                return null;
+        }
+        return path;
+    }
+
+    // Mirrors p5.polygon(0, 20, radius, sides, startAngle) vertex-for-vertex.
+    _polygonPath(path, radius, sides, startAngle) {
+        const angle = (Math.PI * 2) / sides;
+        let first = true;
+        for (let a = startAngle; a < Math.PI * 2 + startAngle; a += angle) {
+            const sx = Math.cos(a) * radius;
+            const sy = 20 + Math.sin(a) * radius;
+            if (first) {
+                path.moveTo(sx, sy);
+                first = false;
+            } else {
+                path.lineTo(sx, sy);
+            }
+        }
+        path.closePath();
+    }
+
     draw() {
         this.updateDrawProgress();
-        
+
         // Main drawing loops with progress control
-        const elementsToShow = this.drawProgressEnabled ? 
-            Math.floor(this.drawElements.length * this.drawProgress) : 
+        const elementsToShow = this.drawProgressEnabled ?
+            Math.floor(this.drawElements.length * this.drawProgress) :
             this.drawElements.length;
-        
+
         // Nothing to paint — skip the transform churn entirely (no pixels either way).
         if (elementsToShow <= 0) return;
-        
+
         // Setup (always happens)
-        this.p.translate(this.x, this.y); 
+        this.p.translate(this.x, this.y);
         this.p.noFill();
-        
+
         // Uniform-coloured donuts (the common case after retintDonut / for halos) set the
         // stroke once instead of per outline — same colour, same order, identical pixels.
         if (this.uniformColour) {
             this.p.stroke(this.drawElements[0].colour);
             this.p.strokeWeight(this.strokeWeight);
         }
-        
+
+        const ctx = this.p.drawingContext;
+        const useRawStack = this.uniformColour;
+        const st = this.p._renderer.states;
+        const canCache =
+            st.ellipseMode === this.p.CENTER && st.rectMode === this.p.CENTER;
+        if (canCache && this._pathSize !== this.size) {
+            this._pathCache = {};
+            this._pathSize = this.size;
+        }
+
         for (let i = 0; i < elementsToShow; i++) {
             const element = this.drawElements[i];
-            
-            // Apply randomized rotation for this element
-            this.p.push();
-            this.p.rotate(element.rotationOffset);
-            if (!this.uniformColour) {
+            const shapeSize = this.size + element.size;
+
+            if (useRawStack) {
+                // p5's push() also snapshots the whole JS style stack per element. A uniform
+                // donut never changes style inside the loop, so raw canvas save/restore
+                // restores the exact transform with none of that overhead.
+                ctx.save();
+                ctx.rotate(element.rotationOffset);
+            } else {
+                // Non-uniform donuts do change stroke() per element, so they keep p5's stack
+                // (its style cache would otherwise desync from the canvas).
+                this.p.push();
+                this.p.rotate(element.rotationOffset);
                 this.p.stroke(element.colour);
                 this.p.strokeWeight(this.strokeWeight);
             }
-            const shapeSize = this.size + element.size;
-            this.p[this.shape](0, 20, shapeSize, shapeSize);
-            this.p.pop();
+
+            let path = canCache ? this._pathCache[element.size] : null;
+            if (canCache && !path) {
+                path = this._buildPath(shapeSize);
+                if (path) this._pathCache[element.size] = path;
+            }
+
+            if (path) {
+                ctx.stroke(path);
+            } else {
+                this.p[this.shape](0, 20, shapeSize, shapeSize);
+            }
+
+            if (useRawStack) {
+                ctx.restore();
+            } else {
+                this.p.pop();
+            }
         }
-        
+
         // Cleanup (always happens)
         this.p.translate(-this.x, -this.y);
     }
