@@ -441,6 +441,13 @@ const sketch = (p) => {
     d.targetReveal = 0;
     d.bounce = 0;
     d.bounceVel = 0;
+    // Give the donut a finite clock so Donut.update() always resolves a concrete size.
+    // Left null, `elapsed / duration` is 0/0 = NaN, which makes the load-time poster (song
+    // time 0) draw nothing — the page showed only the gradient. Live playback clamps to 1
+    // (fully grown), and minSize === maxSize here, so any finite progress yields the same
+    // size either way.
+    d.birthTime = 0;
+    d.duration = 1;
     return d;
   };
 
