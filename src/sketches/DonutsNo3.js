@@ -25,8 +25,6 @@ const midi = base + 'audio/DonutsNo3.mid';
 const TRACK_DARK = 3;
 const TRACK_CALL = 5;
 const TRACK_RESPONSE = 10;
-// Response rotation: pattern 1 (centre), then 4 (centre+middle), then 7 (full), repeating.
-const RESPONSE_PATTERNS = [0b001, 0b011, 0b111];
 
 const PPQ = 15360;
 const BPM = 150;
@@ -35,29 +33,63 @@ const BPM = 150;
 // with long holes between phrases; the response riff is a tight 9-cue burst. 2s splits them.
 const BURST_GAP = 2.0;
 
-// Thirteen equal circles on a hexagonal lattice in three layers — deliberately NOT a strict
-// Fruit of Life. Exact FoL geometry spaces adjacent centres one radius apart, so the rings
-// merge; the layers are pulled apart here so daylight shows between them, which the founder
-// chose. A subset of three layers has 7 non-empty combinations — which is what the call uses.
-//   L1  1 circle at the centre
-//   L2  6 circles at 0.36·unitR  (angles 0, 60, ...)
-//   L3  6 circles at 0.772·unitR (angles 30, 90, ...), sitting in the lattice hollows
-// At 1080p (unitR 540): r = 81px; L2 centre 194px (inner 113, outer 275, 32px gap);
-// L3 centre 417px (inner 336, outer 498, 61px gap). Outer edge 498px < 540px half-axis.
-const LATTICE_R = 0.15; // circle radius as a fraction of unitR
-const LAYER_DIST = [0, 0.36, 0.772]; // ring-centre distance as a fraction of unitR
-const LAYER_ANGLES = [
-  [0], // L1 — the centre
-  [0, 1, 2, 3, 4, 5], // L2 — 6 at distance r
-  [0.5, 1.5, 2.5, 3.5, 4.5, 5.5], // L3 — 6 at √3r, offset 30° to sit in the lattice hollows
+// Mandala patterns. The mandala shows ONE pattern at a time and switches to a different
+// one at every call cycle (never the same twice in a row — see p.nextPattern). The call
+// subsets, response flyers and hero all read p.mandala, so a pattern is just a list of
+// rings: dist = ring-centre distance (fractions of unitR), angles = donut positions
+// (fractions of a full turn), shapes = the primitive each ring's donuts are built from
+// (null = the Donut's own random pick), hueOffset/hueSpread = colour families, spin =
+// counter-rotation scale (sign flips per ring, speed scaled by 1/(0.25+dist) in draw).
+//   P1 Fruit of Life — 1 + 6 + 6 circles on the hexagonal lattice, static.
+//   P2 Nested polygons — 3 + 4 + 6 + 8 donuts, one primitive family per ring, counter-rotating.
+//   P3 Spiral arms — three 8-donut rings of small ellipses skewed 30° apart, co-rotating
+//      faster outward → a dense spiral swarm.
+const PATTERNS = [
+  {
+    name: 'Fruit of Life',
+    latticeR: 0.15,
+    dist: [0, 0.36, 0.772],
+    angles: [
+      [0],
+      [0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6],
+      [1 / 12, 3 / 12, 5 / 12, 7 / 12, 9 / 12, 11 / 12],
+    ],
+    shapes: [null, null, null],
+    hueOffset: [0, 118, 242],
+    hueSpread: 90,
+    spin: [0, 0, 0],
+  },
+  {
+    name: 'Nested polygons',
+    latticeR: 0.12,
+    dist: [0.19, 0.4, 0.61, 0.82],
+    angles: [
+      [0, 1 / 3, 2 / 3],
+      [1 / 8, 3 / 8, 5 / 8, 7 / 8],
+      [1 / 12, 3 / 12, 5 / 12, 7 / 12, 9 / 12, 11 / 12],
+      [0, 1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8],
+    ],
+    shapes: ['equilateral', 'rect', 'hexagon', 'octagon'],
+    hueOffset: [0, 90, 180, 270],
+    hueSpread: 50,
+    spin: [1, -1, 1.3, -1.3],
+  },
+  {
+    name: 'Spiral arms',
+    latticeR: 0.075,
+    dist: [0.2, 0.48, 0.76],
+    // Three rings of eight SMALL donuts, each ring skewed 30° from the one inside it and
+    // all co-rotating faster outward — reads as a dense spiral swarm, not polygon shells.
+    angles: [0, 1, 2].map((li) =>
+      [0, 1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8].map((a) => a + li / 12)
+    ),
+    shapes: ['ellipse', 'ellipse', 'ellipse'],
+    hueOffset: [0, 120, 240],
+    hueSpread: 25,
+    spin: [1, 1.8, 2.6],
+  },
 ];
-// Each call cycle is a 9.6s chord phrase, so the mandala should change key every cycle
-// rather than sit on one hue for the whole track. The three layers sit a triad apart so
-// they read as three distinct families, and the donuts inside a layer are spread evenly
-// across a band around their layer hue — ±12° of jitter left every ring monochrome, so a
-// lone lit layer rendered as one flat colour instead of distinct donuts.
-const LAYER_HUE_OFFSET = [0, 118, 242]; // triad — layer centres
-const LAYER_HUE_SPREAD = 90; // per-donut spread inside a layer; the bands stay ~30° apart
+const RING_SPIN_RATE = 0.16; // pattern-spin scale, rad/s at the innermost ring
 const MANDALA_WEIGHT = 1.2;
 
 // A donut grows out of its layer as that layer reveals, which is the pop the earlier
@@ -171,6 +203,10 @@ const sketch = (p) => {
   p.showingStatic = true;
 
   p.mandala = { layers: [], donuts: [], latticeR: 0, lit: 0 };
+  p.ringPhase = [0, 0, 0, 0]; // per-ring spin accumulator (one entry per layer)
+  p.patternIndex = 0; // which PATTERNS entry the mandala is currently showing
+  p.pattern = PATTERNS[0];
+  p.responsePatterns = []; // ring-by-ring response masks, rebuilt per pattern
   p.subDonuts = [];
   p.palette = [];
   p.callCues = [];
@@ -410,32 +446,36 @@ const sketch = (p) => {
 
   // ---------------------------------------------------------------- the mandala
 
-  p.buildMandala = () => {
+  p.buildMandala = (rebuildHero = true) => {
+    const pat = p.pattern;
     const u = unitR();
-    const cr = u * LATTICE_R;
+    const cr = u * pat.latticeR;
     const cx = p.width / 2;
     const cy = p.height / 2;
     p.mandala = { layers: [], donuts: [], latticeR: cr, lit: 0 };
+    p.ringPhase = [0, 0, 0, 0]; // a fresh pattern starts upright
     p.callCycleHue = 30;
 
-    for (let li = 0; li < LAYER_DIST.length; li++) {
-      const dist = u * LAYER_DIST[li];
+    for (let li = 0; li < pat.dist.length; li++) {
+      const dist = u * pat.dist[li];
       const layer = [];
-      const steps = LAYER_ANGLES[li];
+      const steps = pat.angles[li];
       for (let j = 0; j < steps.length; j++) {
-        const ang = steps[j] * (p.TWO_PI / 6);
+        const ang = steps[j] * p.TWO_PI;
         const d = p.buildDonut(
-          p.callCycleHue + LAYER_HUE_OFFSET[li],
+          p.callCycleHue + pat.hueOffset[li],
           cx + Math.cos(ang) * dist,
           cy + Math.sin(ang) * dist,
           cr,
           MANDALA_WEIGHT * weightScale(),
           MANDALA_SUBSAMPLE
         );
+        // A pattern may fix each ring to one primitive family (null = random per donut).
+        if (pat.shapes[li]) d.shape = pat.shapes[li];
         // Spread the layer's donuts evenly across the band so each reads as its own
         // colour; clustered jitter left a lone lit layer rendering as one flat hue.
         const frac = steps.length > 1 ? j / (steps.length - 1) - 0.5 : 0;
-        d.hueOffset = LAYER_HUE_OFFSET[li] + frac * LAYER_HUE_SPREAD;
+        d.hueOffset = pat.hueOffset[li] + frac * pat.hueSpread;
         p.retintDonut(d, p.callCycleHue);
         // Home is the lattice slot — response flyers launch from here.
         d.hx = d.x;
@@ -446,23 +486,44 @@ const sketch = (p) => {
       p.mandala.layers.push(layer);
     }
 
-    // HERO — one big central ring, full-density scribble at heavy weight (the only
-    // "solid" on screen). Starts dark; drawMandala reveals it once flyers dissipate.
-    p.hero = p.buildDonut(
-      p.callCycleHue,
-      cx,
-      cy,
-      u * HERO_R,
-      HERO_WEIGHT * weightScale(),
-      1
+    // Response tiers for this layer count: ring 1, then +ring 2, ... then full.
+    p.responsePatterns = Array.from(
+      { length: pat.dist.length },
+      (_, i) => (1 << (i + 1)) - 1
     );
-    p.hero.hueOffset = 0;
-    p.retintDonut(p.hero, p.callCycleHue);
-    p.hero.reveal = 0;
-    p.hero.targetReveal = 0;
-    p.hero.drawProgress = 0;
-    p.hero.bounce = 0;
-    p.hero.bounceVel = 0;
+
+    // HERO — one big central ring, full-density scribble at heavy weight (the only
+    // "solid" on screen). Built once, or on resize; a pattern switch keeps it (its
+    // reveal/growth are mid-life and shouldn't reset every phrase).
+    if (rebuildHero || !p.hero) {
+      p.hero = p.buildDonut(
+        p.callCycleHue,
+        cx,
+        cy,
+        u * HERO_R,
+        HERO_WEIGHT * weightScale(),
+        1
+      );
+      p.hero.hueOffset = 0;
+      p.retintDonut(p.hero, p.callCycleHue);
+      p.hero.reveal = 0;
+      p.hero.targetReveal = 0;
+      p.hero.drawProgress = 0;
+      p.hero.bounce = 0;
+      p.hero.bounceVel = 0;
+    }
+  };
+
+  // Swap to a different pattern (never the same twice running) and rebuild the rings.
+  // Add entries to PATTERNS and this scales on its own.
+  p.nextPattern = () => {
+    if (PATTERNS.length > 1) {
+      let idx = p.patternIndex;
+      while (idx === p.patternIndex) idx = Math.floor(p.random(PATTERNS.length));
+      p.patternIndex = idx;
+    }
+    p.pattern = PATTERNS[p.patternIndex];
+    p.buildMandala(false);
   };
 
   // Re-tint every element in place. Called once per call cycle so the mandala changes key
@@ -482,8 +543,8 @@ const sketch = (p) => {
   };
 
   p.buildPosterExtras = () => {
-    // Poster: the complete mandala, all three layers lit, plus fragments mid-flight.
-    p.mandala.lit = 0b111;
+    // Poster: the complete mandala, every layer of the current pattern lit.
+    p.mandala.lit = (1 << p.mandala.layers.length) - 1;
     for (const layer of p.mandala.layers) {
       for (const d of layer) {
         d.reveal = 1;
@@ -544,6 +605,7 @@ const sketch = (p) => {
           MANDALA_WEIGHT * weightScale(),
           MANDALA_SUBSAMPLE
         );
+        if (p.pattern.shapes[li]) f.shape = p.pattern.shapes[li];
         f.baseWeight = MANDALA_WEIGHT * weightScale();
         f.reveal = 1;
         f.targetReveal = 1;
@@ -588,20 +650,21 @@ const sketch = (p) => {
     p.darkUntil = cue.time + durSec + DARK_HOLD;
   };
 
-  // TRACK 5 — house bass call. Each PUNCH picks one of the 7 non-empty subsets of the 3
-  // mandala layers and lights it, and the figure then HOLDS for the punch-snap pair —
-  // re-rolling on every 0.3s cue reconfigured the whole figure 3.3×/s, which read as
-  // flicker rather than a mandala. Stabs come in identical PAIRS, so the odd note punches
-  // the mandala out and the even one snaps it back.
+  // TRACK 5 — house bass call. Each PUNCH picks one of the non-empty subsets of the
+  // current pattern's layers and lights it, and the figure then HOLDS for the punch-snap
+  // pair — re-rolling on every 0.3s cue reconfigured the whole figure 3.3×/s, which read
+  // as flicker rather than a mandala. Stabs come in identical PAIRS, so the odd note
+  // punches the mandala out and the even one snaps it back.
   p.executeTrack5 = (note) => {
     const cue = p.callCues[note.currentCue - 1];
     if (!cue) return;
     const isNewCycle = cue.time - p.lastCallTime > BURST_GAP;
     if (isNewCycle) {
       p.callStep = 0;
-      // The mandala changes key with each 9.6s chord phrase — sampled off the live
-      // backdrop (contrast step) so it never sits on one hue all track. Falls back to
-      // the chord voicing before the first background has rolled.
+      // New phrase → new pattern (never the same twice running), then key it off the live
+      // backdrop (contrast step) so it never sits on one hue all track. Falls back to the
+      // chord voicing before the first background has rolled.
+      p.nextPattern();
       const bgHue = p.fullScreenBaseHue;
       p.callCycleHue = Number.isFinite(bgHue)
         ? wrapHue(bgHue + BG_CONTRAST)
@@ -617,11 +680,13 @@ const sketch = (p) => {
     p.heroScale = isPunch ? PUNCH_SCALE : SNAP_SCALE;
     p.heroVel = 0;
 
-    // Random across the 7 non-empty subsets of the three layers, held for the pair —
-    // and never the same figure twice in a row.
+    // Random across the non-empty subsets of the current pattern's layers, held for the
+    // pair — and never the same figure twice in a row.
     if (isPunch) {
-      let mask = 1 + Math.floor(p.random(7));
-      while (mask === p.mandala.lit) mask = 1 + Math.floor(p.random(7));
+      const n = p.mandala.layers.length;
+      const maxMask = (1 << n) - 1;
+      let mask = 1 + Math.floor(p.random(maxMask));
+      while (mask === p.mandala.lit) mask = 1 + Math.floor(p.random(maxMask));
       p.mandala.lit = mask;
       for (let li = 0; li < p.mandala.layers.length; li++) {
         const on = (mask >> li) & 1;
@@ -669,9 +734,9 @@ const sketch = (p) => {
       // Reshuffle the hero scribble so the texture itself varies per burst.
       if (p.hero) p.hero.initDrawProgress();
     }
-    const stepIdx = p.responseStep % RESPONSE_PATTERNS.length;
+    const stepIdx = p.responseStep % p.responsePatterns.length;
     p.responseStep++;
-    p.spawnResponsePattern(RESPONSE_PATTERNS[stepIdx]);
+    p.spawnResponsePattern(p.responsePatterns[stepIdx]);
     // The hero grows over the burst — each hit advances the growth target (eased
     // per-frame into continuous growth) and re-pegs its spring so it wobbles.
     const bi = p.responseBurstOf[idx];
@@ -722,8 +787,18 @@ const sketch = (p) => {
   p.drawMandala = (dt) => {
     const s = p.heroScale;
     const kick = 1 + p.kickThump * 0.5;
+    const cx = p.width / 2;
+    const cy = p.height / 2;
 
-    for (const layer of p.mandala.layers) {
+    p.mandala.layers.forEach((layer, li) => {
+      // Counter-rotating shells — sign flips per ring, speed falls off with radius.
+      p.ringPhase[li] +=
+        (p.pattern.spin[li] ?? 0) * (RING_SPIN_RATE / (0.25 + p.pattern.dist[li])) * dt;
+      p.push();
+      p.translate(cx, cy);
+      p.rotate(p.ringPhase[li]);
+      p.translate(-cx, -cy);
+
       for (const d of layer) {
         // Each donut's own spring runs even while dark, so newly lit rings are mid-wobble.
         d.bounceVel += (0 - d.bounce) * BOUNCE_K;
@@ -745,7 +820,9 @@ const sketch = (p) => {
         const w = MANDALA_WEIGHT * weightScale() * kick;
         p.drawWithHalo(d, w, w * HALO_WEIGHT);
       }
-    }
+
+      p.pop();
+    });
 
     // HERO hold + dissolve + growth — hits advance the growth target (eased here
     // into continuous small-to-big), so here only decides hold vs dissolve: hold
@@ -901,6 +978,7 @@ const sketch = (p) => {
   p.resetAnimation = () => {
     p.subDonuts = [];
     p.mandala.lit = 0;
+    for (let i = 0; i < p.ringPhase.length; i++) p.ringPhase[i] = 0;
     if (p.hero) {
       p.hero.reveal = 0;
       p.hero.targetReveal = 0;
