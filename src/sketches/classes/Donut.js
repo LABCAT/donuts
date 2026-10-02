@@ -165,9 +165,14 @@ export class Donut {
         const ctx = this.p.drawingContext;
         const useRawStack = this.uniformColour;
         const st = this.p._renderer.states;
+        // Cache only once the donut has a real size — callers that draw() before their
+        // first update() (e.g. DonutsNo1) pass an undefined size, and NaN paths would
+        // draw nothing while an uninitialised cache would throw.
         const canCache =
-            st.ellipseMode === this.p.CENTER && st.rectMode === this.p.CENTER;
-        if (canCache && this._pathSize !== this.size) {
+            Number.isFinite(this.size) &&
+            st.ellipseMode === this.p.CENTER &&
+            st.rectMode === this.p.CENTER;
+        if (canCache && (!this._pathCache || this._pathSize !== this.size)) {
             this._pathCache = {};
             this._pathSize = this.size;
         }
