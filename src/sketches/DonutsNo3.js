@@ -102,14 +102,10 @@ const GROW_MIN = 0.35;
 const REVEAL_RATE = 14; // rate constant for a layer coming on
 const DARK_RATE = 16; // layers fade rather than cut, so held figures don't strobe
 
-// Poster-extra fragments are small orbiting donuts.
-const FRAGMENT_SIZE = 0.07;
-
 // Response flyers sail outward at this fraction of unitR per second and dissolve away.
 const FLY_SPEED = 1.2;
-const FAST_LIFE = 1.0; // fast flyers live this long — the poster keeps slow SUB_LIFE
+const FAST_LIFE = 1.0; // fast flyers live this long
 const MAX_SUB = 64; // caps live response flyers — oldest (most faded) drop first
-const SUB_FLIGHT = 0.7; // fraction of unitR per second of outward travel
 const SUB_LIFE = 1.5;
 
 // The canvas is transparent so the DOM gradient shows through, which means No1's
@@ -120,7 +116,6 @@ const HALO_SUBSAMPLE = 5; // every 5th kept outline carries a halo — random ro
 const HALO_WEIGHT = 3.4; // halo strokes are much fatter than the body
 const HALO_BRI = 7; // near-black, but keeps a trace of hue so it reads as shadow, not a hole
 const MANDALA_SUBSAMPLE = 2; // 13 donuts are on screen at once — halve each scribble
-const SUB_BODY_SUBSAMPLE = 3; // fragments are small and numerous — thin theirs right down
 const BASE_OVERLAY = 0.45; // black veil over the gradient; donuts need a dark bed to read
 
 // Sampler 2 (trk 3) veil — reverse of GlyphsNo1's blackFade (recipes/black-fade.md):
@@ -565,25 +560,16 @@ const sketch = (p) => {
       p.hero.targetReveal = 1;
       p.hero.drawProgress = 1;
     }
-    const u = unitR();
-    for (let i = 0; i < 14; i++) {
-      const ang = (i / 14) * p.TWO_PI + p.random(-0.1, 0.1);
-      const dist = u * p.random(0.55, 0.98);
-      const f = p.buildDonut(
-        p.random(360),
-        p.width / 2 + Math.cos(ang) * dist,
-        p.height / 2 + Math.sin(ang) * dist,
-        u * FRAGMENT_SIZE,
-        0.9 * weightScale(),
-        SUB_BODY_SUBSAMPLE
-      );
-      f.reveal = 1;
-      f.drawProgress = 1;
-      f.age = p.random(0.2, 0.9);
-      f.vx = Math.cos(ang) * u * SUB_FLIGHT * 0.7;
-      f.vy = Math.sin(ang) * u * SUB_FLIGHT * 0.7;
-      f.isFrag = true;
-      p.subDonuts.push(f);
+    // The flyers are a REAL response burst, not scattered decoration: launch them from
+    // their lattice homes with the same mechanic the riff uses, then pose the frame a third
+    // of a second into the outward sweep (No1/No2 posters show a genuine frame too).
+    p.subDonuts = [];
+    p.spawnResponsePattern(p.mandala.lit);
+    const flight = 0.35; // seconds into the burst
+    for (const d of p.subDonuts) {
+      d.age = flight;
+      d.x += d.vx * flight;
+      d.y += d.vy * flight;
     }
   };
 
