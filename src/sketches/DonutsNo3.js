@@ -895,6 +895,11 @@ const sketch = (p) => {
   p.draw = () => {
     const dt = Math.min(0.05, (p.deltaTime || 16.7) / 1000);
 
+    // Headless capture drives draw() directly and never clicks, so the static
+    // preview branch would otherwise freeze the mandala for the whole run
+    // (only the DOM gradient animates). Drop the poster as soon as capture starts.
+    if (p.captureInProgress) p.showingStatic = false;
+
     if (p.showingStatic) {
       p.clear();
       p.push();
@@ -906,7 +911,9 @@ const sketch = (p) => {
       return;
     }
 
-    if (!((p.audioLoaded && p.song.isPlaying()) || p.songHasFinished)) return;
+    // Capture never plays the song — allow the animated path while captureInProgress
+    // so the mandala actually animates in the captured frames.
+    if (!((p.audioLoaded && (p.song.isPlaying() || p.captureInProgress)) || p.songHasFinished)) return;
 
     // Sampler 2 veil — reverse of GlyphsNo1's blackFade (recipes/black-fade.md): every
     // note snaps the veil open and eases it INTO black over the note's own duration.
