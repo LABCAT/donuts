@@ -28,7 +28,7 @@ const sketch = (p) => {
     window.toggleFps = () => p.toggleFpsIndicator();
     window.addEventListener('keydown', (e) => {
       if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-    });
+    }, { signal: p.lifetime.signal });
     initCapture(p, {
       prefix: 'DonutsNo2',
       enabled: false,
@@ -319,4 +319,4 @@ const sketch = (p) => {
   p.mousePressed = () => p.togglePlayback();
 };
 
-new p5(sketch);
+export default sketch;

@@ -2,6 +2,7 @@
 import SketchLayout from '@labcat2020/animation-lab/layouts/SketchLayout.astro';
 import { sketchMetadata } from '@/sketchMetadata.js';
 import config from '@/project.config.js';
+import DonutsStemControls from '@/components/DonutsStemControls.astro';
 
 export async function getStaticPaths() {
   return Object.keys(sketchMetadata).map((id) => ({
@@ -20,23 +21,31 @@ const { sketchInfo } = Astro.props;
   hashLips={true}
   header={true}
   showFps={true}
-/>
+  trackNav={true}
+>
+  <DonutsStemControls hidden={sketchInfo.sketch !== 'DonutsNo4.js'} />
+</SketchLayout>
+
+<style is:global>
+  /* No room for the track name beside the panel's buttons on a phone (below the lab's md). */
+  @media (max-width: 767.98px) {
+    .lab-control-panel__track {
+      display: none;
+    }
+  }
+</style>
 
 <script>
-  const sketches = {
-    'number-1': () => import('/src/sketches/DonutsNo1.js'),
-    'number-2': () => import('/src/sketches/DonutsNo2.js'),
-    'number-3': () => import('/src/sketches/DonutsNo3.js'),
-  };
+  import { startSeries } from '@sketches/DonutsSeries.js';
 
   const pathSegments = window.location.pathname.split('/');
   const sketchId =
     pathSegments[pathSegments.length - 1] ||
     pathSegments[pathSegments.length - 2];
 
-  sketches[sketchId]?.()
-    .then((module) => {
-      console.log('Sketch loaded successfully!', module);
+  startSeries(sketchId)
+    .then(() => {
+      console.log('Sketch loaded successfully!');
     })
     .catch((err) => {
       console.error('Failed to load sketch:', err);

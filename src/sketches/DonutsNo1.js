@@ -1,4 +1,3 @@
-import p5 from 'p5';
 import '@lib/p5.audioReact.js';
 import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
@@ -21,6 +20,12 @@ const sketch = (p) => {
   p.showingStatic = true;
 
   p.setup = async () => {
+    // The panel's play button never reaches mousePressed, so restart the draw
+    // loop the poster stopped from here.
+    const { signal } = p.lifetime;
+    window.addEventListener('labcat:playback', (e) => {
+      if (e.detail?.playing && !p.isLooping()) p.loop();
+    }, { signal });
     p.createCanvas(p.windowWidth, p.windowHeight);
     p.canvas.classList.add('p5Canvas--cursor-play');
     p.canvas.style.position = 'relative';
@@ -32,7 +37,7 @@ const sketch = (p) => {
     window.toggleFps = () => p.toggleFpsIndicator();
     window.addEventListener('keydown', (e) => {
       if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-    });
+    }, { signal });
     initCapture(p, {
       prefix: 'DonutsNo1',
       enabled: false,
@@ -388,4 +393,4 @@ const sketch = (p) => {
   p.isPortraitCanvas = () => p.height > p.width;
 };
 
-new p5(sketch);
+export default sketch;

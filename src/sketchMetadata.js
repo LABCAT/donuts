@@ -14,6 +14,11 @@ export const sketchMetadata = {
     description: 'Funk call and response — a donut punches out, snaps back, then detonates.',
     sketch: 'DonutsNo3.js',
   },
+  'number-4': {
+    title: '#DonutsNo4',
+    description: 'One donut per stem — tap a donut to mute or unmute it.',
+    sketch: 'DonutsNo4.js',
+  },
 };
 
 export function getAllSketches() {
