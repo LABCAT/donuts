@@ -2,18 +2,23 @@ import p5 from 'p5';
 import '@lib/p5.audioReact.js';
 import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
+import { mountSketch } from '@labcat2020/p5.audioreactive/mount.js';
 import '@labcat2020/p5.polygon';
 import { Donut } from './classes/Donut.js';
+import { NO2_BPM, NO2_PARTS } from '@/donutsParts.js';
 
 const base = import.meta.env.BASE_URL || './';
 const audio = base + 'audio/DonutsNo2.mp3';
 const midi = base + 'audio/DonutsNo2.mid';
 
-const sketch = (p) => {
+export const title = '#DonutsNo2';
+export const song = { audio, midi, bpm: NO2_BPM, parts: NO2_PARTS };
+
+const sketch = (p, ctx) => {
   p.song = null;
   p.fft = null;
   p.PPQ = 3840 * 4;
-  p.bpm = 108;
+  p.bpm = NO2_BPM;
   p.blackFade = { active: false, startTime: 0, duration: 0 };
   p.centerDonuts = [];
   p.waveBursts = [];
@@ -25,10 +30,19 @@ const sketch = (p) => {
     const params = new URLSearchParams(window.location.search);
     const wantsFps = !params.has('fps') || params.get('fps') !== '0';
     if (wantsFps) p.enableFpsIndicator();
-    window.toggleFps = () => p.toggleFpsIndicator();
-    window.addEventListener('keydown', (e) => {
+    const toggleFps = () => p.toggleFpsIndicator();
+    window.toggleFps = toggleFps;
+    p.onDestroy(() => {
+      if (window.toggleFps === toggleFps) delete window.toggleFps;
+    });
+    p.listen(window, 'keydown', (e) => {
       if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-    }, { signal: p.lifetime.signal });
+    });
+    p.onDestroy(() => {
+      const host = p.container ?? document.documentElement;
+      host.style.removeProperty('--canvas-complex-bg');
+      host.style.removeProperty('--canvas-complex-blend-mode');
+    });
     initCapture(p, {
       prefix: 'DonutsNo2',
       enabled: false,
@@ -37,12 +51,28 @@ const sketch = (p) => {
     p.angleMode(p.DEGREES);
     p.rectMode(p.CENTER);
     p.colorMode(p.HSB, 360, 100, 100, 1);
+
+    const urlSeed = ctx?.seed ?? params.get('seed');
+    p.lookSeed = urlSeed ? p.hashToSeed(String(urlSeed)) : Math.floor(Math.random() * 1e9);
+    p.randomSeed(p.lookSeed);
     p.currentHue = 200;
     p.currentColorScheme = [];
     for (let h = 0; h < 360; h += 45) p.currentColorScheme.push(p.color(h, 80, 100));
     p.setComplementaryCanvasBg();
 
-    await p.loadSong(audio, midi, (result) => {
+    // Before the first note (for cue replay at a part start).
+    p.resetCueState = () => {
+      p.randomSeed(p.lookSeed);
+      p.currentHue = 200;
+      p.currentColorScheme = [];
+      for (let h = 0; h < 360; h += 45) p.currentColorScheme.push(p.color(h, 80, 100));
+      p.blackFade = { active: false, startTime: 0, duration: 0 };
+      p.centerDonuts = [];
+      p.waveBursts = [];
+      p.setComplementaryCanvasBg();
+    };
+
+    const onMidi = (result) => {
       const tColor = result.tracks[10];
       const tSpikes = result.tracks[9];
       const tArc = result.tracks[11];
@@ -52,7 +82,20 @@ const sketch = (p) => {
       if (tSpikes?.notes?.length) p.scheduleCueSet(tSpikes.notes, 'executeTrack2');
       if (tArc?.notes?.length) p.scheduleCueSet(tArc.notes, 'executeTrack3');
       if (tGlyph?.notes?.length) p.scheduleCueSet(tGlyph.notes, 'executeTrack4');
-    });
+    };
+
+    if (ctx) {
+      p.attachSong(ctx.song, ctx.midi, onMidi);
+      p.useClock(ctx.clock, { host: true });
+    } else {
+      await p.loadSong(audio, midi, onMidi);
+      p.usePartPlayer({
+        parts: NO2_PARTS,
+        bpm: NO2_BPM,
+        part: params.get('part'),
+        seed: () => p.lookSeed,
+      });
+    }
 
     p.fft = new p5.FFT();
     p.song.disconnect();
@@ -312,11 +355,24 @@ const sketch = (p) => {
 
   p.setComplementaryCanvasBg = () => {
     const { bg, blendModes } = p.generateComplementaryBg();
-    document.documentElement.style.setProperty('--canvas-complex-bg', bg);
-    document.documentElement.style.setProperty('--canvas-complex-blend-mode', blendModes);
+    // Scope the gradient to this sketch's layer: a hidden suite preload must not
+    // repaint the sketch the viewer is watching.
+    const host = p.container ?? document.documentElement;
+    host.style.setProperty('--canvas-complex-bg', bg);
+    host.style.setProperty('--canvas-complex-blend-mode', blendModes);
+  };
+
+  p.hashToSeed = (str) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = Math.imul(31, hash) + str.charCodeAt(i) | 0;
+    }
+    return Math.abs(hash);
   };
 
   p.mousePressed = () => p.togglePlayback();
 };
+
+export const mount = (container, ctx) => mountSketch(container, sketch, ctx);
 
 export default sketch;

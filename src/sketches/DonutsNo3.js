@@ -1,11 +1,13 @@
 import '@lib/p5.audioReact.js';
 import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
+import { mountSketch } from '@labcat2020/p5.audioreactive/mount.js';
 import { createDomLayerCaptureBackground } from '@labcat2020/p5.audioreactive-capture/dom-layer';
 import { compositeDomCaptureExtension } from '@labcat2020/p5.audioreactive-capture/composite';
 import '@labcat2020/p5.polygon';
 import { Donut } from './classes/Donut.js';
 import ColorGenerator from '@lib/p5.colorGenerator.js';
+import { NO3_BPM, NO3_PARTS } from '@/donutsParts.js';
 import {
   installFullScreenBg,
   randomizeFullScreenBg,
@@ -15,6 +17,11 @@ import {
 const base = import.meta.env.BASE_URL || './';
 const audio = base + 'audio/DonutsNo3.mp3';
 const midi = base + 'audio/DonutsNo3.mid';
+
+export const title = '#DonutsNo3';
+// Parts use the song's real 100 BPM (2.4s a bar). The sketch keeps its historic
+// 150 for cue note-durations, so leave p.bpm alone.
+export const song = { audio, midi, bpm: NO3_BPM, parts: NO3_PARTS };
 
 // Track map, read off DonutsNo3.mid (12 tracks, ppq 15360, 150bpm, 57.6s = 6 x 9.6s cycles).
 //   trk 3  Sampler 2          197 notes          — chord stabs 28.8s→53.4s = the VEIL (fade to black)
@@ -185,7 +192,7 @@ const chordHue = (pitches) => {
   return (sum / Math.max(1, pitches.length)) % 360;
 };
 
-const sketch = (p) => {
+const sketch = (p, ctx) => {
   // Always loop: when the song ends, the lib's onended → _restartSongPlayback()
   // replays from 0 (and calls p.resetAnimation first). ARA skill mandates this.
   p.loopAudio = true;
@@ -299,31 +306,38 @@ const sketch = (p) => {
   };
 
   p.setup = async () => {
-    // The panel's play button never reaches mousePressed, so start the first pass
-    // and restart the draw loop the poster stopped from here.
-    const { signal } = p.lifetime;
-    window.addEventListener('labcat:playback', (e) => {
-      if (!e.detail?.playing || p.isLooping()) return;
-      p.resetAnimation();
-      p.loop();
-    }, { signal });
-    p.randomSeed(
+    // The panel's play button never reaches mousePressed, so restart the draw
+    // loop the poster stopped from here (the suite host emits this on play).
+    p.listen(window, 'labcat:playback', (e) => {
+      if (!e.detail?.playing) return;
+      p.showingStatic = false;
+      if (!p.isLooping()) p.loop();
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const urlSeed = ctx?.seed ?? params.get('seed');
+    p.lookSeed =
       typeof hl !== 'undefined' && hl?.tx
         ? p.hashToSeed(hl.tx.hash + hl.tx.tokenId)
-        : Math.floor(Math.random() * 1e9)
-    );
+        : urlSeed
+          ? p.hashToSeed(String(urlSeed))
+          : Math.floor(Math.random() * 1e9);
+    p.randomSeed(p.lookSeed);
     // Gradient as a co-star: 'loud' profile, but with a real black veil over it — the canvas
     // is transparent, so without this the gradient is the brightest thing on screen and the
     // thin donut outlines have nothing to read against.
     installFullScreenBg(p, { overlayOpacity: BASE_OVERLAY, profile: 'loud' });
 
-    const params = new URLSearchParams(window.location.search);
     const wantsFps = !params.has('fps') || params.get('fps') !== '0';
     if (wantsFps) p.enableFpsIndicator();
-    window.toggleFps = () => p.toggleFpsIndicator();
-    window.addEventListener('keydown', (e) => {
+    const toggleFps = () => p.toggleFpsIndicator();
+    window.toggleFps = toggleFps;
+    p.onDestroy(() => {
+      if (window.toggleFps === toggleFps) delete window.toggleFps;
+    });
+    p.listen(window, 'keydown', (e) => {
       if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-    }, { signal });
+    });
 
     p.pixelDensity(1);
     p.createCanvas(p.windowWidth, p.windowHeight);
@@ -350,7 +364,61 @@ const sketch = (p) => {
     p.buildMandala();
     p.buildPosterExtras();
 
-    await p.loadSong(audio, midi, (data) => {
+    // Put everything cue-driven back to "before the first note". Rebuild the
+    // seeded look first, so replaying the cues to a part start reaches the same
+    // values as a full play from the top.
+    p.resetCueState = () => {
+      p.randomSeed(p.lookSeed);
+      p._triHueSeed = undefined;
+      p.fullScreenGradient = undefined;
+      randomizeFullScreenBg(p);
+      p.patternIndex = 0;
+      p.pattern = PATTERNS[0];
+      p.palette = p.generateColourScheme(p.random(p.colourModes));
+      p.currentColorScheme = p.palette;
+      p.buildMandala();
+      p.buildPosterExtras();
+
+      p.mandala.lit = 0;
+      for (const layer of p.mandala.layers) {
+        for (const d of layer) {
+          d.reveal = 0;
+          d.drawProgress = 0;
+          d.targetReveal = 0;
+          d.bounce = 0;
+          d.bounceVel = 0;
+        }
+      }
+      if (p.hero) {
+        p.hero.reveal = 0;
+        p.hero.targetReveal = 0;
+        p.hero.drawProgress = 0;
+        p.hero.bounce = 0;
+        p.hero.bounceVel = 0;
+      }
+      p.subDonuts = [];
+      p.callStep = 0;
+      p.responseStep = 0;
+      p.callCycleHue = 30;
+      p.lastCallTime = -99;
+      p.lastResponseTime = -99;
+      p.heroScale = 1;
+      p.heroVel = 0;
+      p.kickThump = 0;
+      p.heroProg = 0;
+      p.heroProgTarget = 0;
+      p.dark = 0;
+      p.darkTarget = 0;
+      p.darkUntil = 0;
+      p.darkFade = { active: false, startTime: 0, duration: 0 };
+      p.darkLastVoicing = null;
+      p.fullScreenEnvelope.active = false;
+
+      // The very start has no cue to pose it: keep the full poster frame there.
+      if (p.showingStatic && !p._clock?.range?.start) p.buildPosterExtras();
+    };
+
+    const onMidi = (data) => {
       p.callCues = groupByTicks(data.tracks[TRACK_CALL]?.notes);
       p.responseCues = groupByTicks(data.tracks[TRACK_RESPONSE]?.notes);
       p.darkCues = groupByTicks(data.tracks[TRACK_DARK]?.notes);
@@ -384,7 +452,20 @@ const sketch = (p) => {
       p.scheduleCueSet(p.callCues.length ? data.tracks[TRACK_CALL].notes : [], 'executeTrack5');
       p.scheduleCueSet(p.responseCues.length ? data.tracks[TRACK_RESPONSE].notes : [], 'executeTrack10');
       p.scheduleCueSet(p.darkCues.length ? data.tracks[TRACK_DARK].notes : [], 'executeTrack3');
-    });
+    };
+
+    if (ctx) {
+      p.attachSong(ctx.song, ctx.midi, onMidi);
+      p.useClock(ctx.clock, { host: true });
+    } else {
+      await p.loadSong(audio, midi, onMidi);
+      p.usePartPlayer({
+        parts: NO3_PARTS,
+        bpm: NO3_BPM,
+        part: params.get('part'),
+        seed: () => p.lookSeed,
+      });
+    }
   };
 
   // ---------------------------------------------------------------- donut builders
@@ -905,7 +986,8 @@ const sketch = (p) => {
     // Headless capture drives draw() directly and never clicks, so the static
     // preview branch would otherwise freeze the mandala for the whole run
     // (only the DOM gradient animates). Drop the poster as soon as capture starts.
-    if (p.captureInProgress) p.showingStatic = false;
+    // A suite hand-off can also start this sketch's clock before any play event.
+    if (p.captureInProgress || p._clock?.playing) p.showingStatic = false;
 
     if (p.showingStatic) {
       p.clear();
@@ -1021,7 +1103,6 @@ const sketch = (p) => {
   p.mousePressed = () => {
     p.togglePlayback();
     if (p.audioLoaded && p.song?.isPlaying()) {
-      p.resetAnimation();
       p.showingStatic = false;
       p.loop();
     }
@@ -1038,5 +1119,7 @@ const sketch = (p) => {
     return Math.abs(hash);
   };
 };
+
+export const mount = (container, ctx) => mountSketch(container, sketch, ctx);
 
 export default sketch;

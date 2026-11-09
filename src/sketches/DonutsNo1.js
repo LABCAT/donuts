@@ -1,31 +1,37 @@
 import '@lib/p5.audioReact.js';
 import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
+import { mountSketch } from '@labcat2020/p5.audioreactive/mount.js';
 import '@labcat2020/p5.polygon';
 import { Donut } from './classes/Donut.js';
 import ColorGenerator from '@lib/p5.colorGenerator.js';
+import { NO1_BPM, NO1_PARTS } from '@/donutsParts.js';
 
 const base = import.meta.env.BASE_URL || './';
 const audio = base + 'audio/DonutsNo1.ogg';
 const midi = base + 'audio/DonutsNo1.mid';
 
-const sketch = (p) => {
+export const title = '#DonutsNo1';
+export const song = { audio, midi, bpm: NO1_BPM, parts: NO1_PARTS };
+
+const sketch = (p, ctx) => {
   p.song = null;
   p.audioSampleRate = 0;
   p.totalAnimationFrames = 0;
   p.PPQ = 3840 * 4;
-  p.bpm = 54;
+  p.bpm = NO1_BPM;
   p.audioLoaded = false;
   p.songHasFinished = false;
   p.showingStatic = true;
 
   p.setup = async () => {
     // The panel's play button never reaches mousePressed, so restart the draw
-    // loop the poster stopped from here.
-    const { signal } = p.lifetime;
-    window.addEventListener('labcat:playback', (e) => {
-      if (e.detail?.playing && !p.isLooping()) p.loop();
-    }, { signal });
+    // loop the poster stopped from here (the suite host emits this on play).
+    p.listen(window, 'labcat:playback', (e) => {
+      if (!e.detail?.playing) return;
+      p.showingStatic = false;
+      if (!p.isLooping()) p.loop();
+    });
     p.createCanvas(p.windowWidth, p.windowHeight);
     p.canvas.classList.add('p5Canvas--cursor-play');
     p.canvas.style.position = 'relative';
@@ -34,26 +40,33 @@ const sketch = (p) => {
     const params = new URLSearchParams(window.location.search);
     const wantsFps = !params.has('fps') || params.get('fps') !== '0';
     if (wantsFps) p.enableFpsIndicator();
-    window.toggleFps = () => p.toggleFpsIndicator();
-    window.addEventListener('keydown', (e) => {
+    const toggleFps = () => p.toggleFpsIndicator();
+    window.toggleFps = toggleFps;
+    p.onDestroy(() => {
+      if (window.toggleFps === toggleFps) delete window.toggleFps;
+    });
+    p.listen(window, 'keydown', (e) => {
       if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-    }, { signal });
+    });
     initCapture(p, {
       prefix: 'DonutsNo1',
       enabled: false,
       captureCSSBackground: false,
     });
 
-    const seed =
+    const urlSeed = ctx?.seed ?? params.get('seed');
+    p.lookSeed =
       typeof hl !== 'undefined' && hl?.tx
         ? p.hashToSeed(hl.tx.hash + hl.tx.tokenId)
-        : Math.floor(Math.random() * 1e9);
+        : urlSeed
+          ? p.hashToSeed(String(urlSeed))
+          : Math.floor(Math.random() * 1e9);
     if (typeof hl !== 'undefined' && hl?.tx) {
       console.log(
-        `Hash: ${hl.tx.hash}, TokenID: ${hl.tx.tokenId}, Seed: ${seed}`
+        `Hash: ${hl.tx.hash}, TokenID: ${hl.tx.tokenId}, Seed: ${p.lookSeed}`
       );
     }
-    p.randomSeed(seed);
+    p.randomSeed(p.lookSeed);
     p.background(0, 0, 0);
     p.rectMode(p.CENTER);
     p.colorMode(p.HSB);
@@ -62,12 +75,39 @@ const sketch = (p) => {
     p.subDonuts = [];
     p.loops = p.generateLoopData();
 
-    await p.loadSong(audio, midi, (result) => {
+    // The clock's cue replay needs the state from before the first note. Rebuild
+    // the seeded look first, so replaying cues lands on the same values a full
+    // play from the top would reach.
+    p.resetCueState = () => {
+      p.randomSeed(p.lookSeed);
+      p.currentColorScheme = p.generateColourScheme(p.random(p.colourModes));
+      p.loops = p.generateLoopData();
+      p.mainDonuts = [];
+      p.subDonuts = [];
+      p.subDonutPattern = undefined;
+      p.subDonutPositions = undefined;
+    };
+
+    const onMidi = (result) => {
       const track1 = result.tracks[16].notes;
       const track2 = result.tracks[10].notes;
       p.scheduleCueSet(track1, 'executeTrack1');
       p.scheduleCueSet(track2, 'executeTrack2');
-    });
+    };
+
+    if (ctx) {
+      // A suite host owns the song, MIDI and clock.
+      p.attachSong(ctx.song, ctx.midi, onMidi);
+      p.useClock(ctx.clock, { host: true });
+    } else {
+      await p.loadSong(audio, midi, onMidi);
+      p.usePartPlayer({
+        parts: NO1_PARTS,
+        bpm: NO1_BPM,
+        part: params.get('part'),
+        seed: () => p.lookSeed,
+      });
+    }
   };
 
   p.generateLoopData = () => {
@@ -124,6 +164,9 @@ const sketch = (p) => {
   };
 
   p.draw = () => {
+    // A suite hand-off can start this sketch's clock before any play event.
+    if (p.showingStatic && (p._clock?.playing || p.captureInProgress)) p.showingStatic = false;
+
     if (p.showingStatic) {
       p.background(0, 0, 0);
       const finalLoop = p.loops[5];
@@ -392,5 +435,7 @@ const sketch = (p) => {
 
   p.isPortraitCanvas = () => p.height > p.width;
 };
+
+export const mount = (container, ctx) => mountSketch(container, sketch, ctx);
 
 export default sketch;
