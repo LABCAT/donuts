@@ -1,4 +1,3 @@
-import p5 from 'p5';
 import '@lib/p5.audioReact.js';
 import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
@@ -300,6 +299,14 @@ const sketch = (p) => {
   };
 
   p.setup = async () => {
+    // The panel's play button never reaches mousePressed, so start the first pass
+    // and restart the draw loop the poster stopped from here.
+    const { signal } = p.lifetime;
+    window.addEventListener('labcat:playback', (e) => {
+      if (!e.detail?.playing || p.isLooping()) return;
+      p.resetAnimation();
+      p.loop();
+    }, { signal });
     p.randomSeed(
       typeof hl !== 'undefined' && hl?.tx
         ? p.hashToSeed(hl.tx.hash + hl.tx.tokenId)
@@ -316,7 +323,7 @@ const sketch = (p) => {
     window.toggleFps = () => p.toggleFpsIndicator();
     window.addEventListener('keydown', (e) => {
       if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-    });
+    }, { signal });
 
     p.pixelDensity(1);
     p.createCanvas(p.windowWidth, p.windowHeight);
@@ -1032,4 +1039,4 @@ const sketch = (p) => {
   };
 };
 
-new p5(sketch);
+export default sketch;
