@@ -18,6 +18,14 @@ const SKETCHES = {
   'number-2': () => import('./DonutsNo2.js'),
   'number-3': () => import('./DonutsNo3.js'),
   'number-4': () => import('./DonutsNo4.js'),
+  'number-5': () => import('./DonutsNo5.js'),
+  'number-6': () => import('./DonutsNo6.js'),
+  'number-7': () => import('./DonutsNo7.js'),
+  'number-8': () => import('./DonutsNo8.js'),
+  'number-9': () => import('./DonutsNo9.js'),
+  'number-10': () => import('./DonutsNo10.js'),
+  'number-11': () => import('./DonutsNo11.js'),
+  'number-12': () => import('./DonutsNo12.js'),
 };
 const ROUTES = Object.keys(sketchMetadata);
 const WITH_PARTS = 'number-4';
