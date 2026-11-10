@@ -37,18 +37,16 @@ const { sketchInfo } = Astro.props;
 
 <script>
   import { startSeries } from '@sketches/DonutsSeries.js';
-  import { startNo4Series } from '@sketches/DonutsNo4Series.js';
 
   const pathSegments = window.location.pathname.split('/');
   const sketchId =
     pathSegments[pathSegments.length - 1] ||
     pathSegments[pathSegments.length - 2];
 
-  // No1–No3 are hosted by the lab suite (parts flow into each other). No4 still
-  // has its own stem transport, so it keeps the legacy player.
-  const start = sketchId === 'number-4' ? startNo4Series : startSeries;
-
-  start(sketchId)
+  // startSeries picks the player: the lab suite for the musical sketches
+  // (No1–No3, No5–No10), the legacy dip-to-black player for No4 and the
+  // placeholders.
+  startSeries(sketchId)
     .then(() => {
       console.log('Sketch loaded successfully!');
     })

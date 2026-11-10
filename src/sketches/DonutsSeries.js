@@ -1,33 +1,91 @@
 import p5 from 'p5';
 import { sketchMetadata } from '@/sketchMetadata.js';
 import { PARTS } from '@/audioTracks.js';
+import { createSuitePlayer } from '@labcat2020/animation-lab/suite';
+import { createSuiteEngine } from '@labcat2020/p5.audioreactive/suite.js';
+import {
+  NO1_PARTS,
+  NO2_PARTS,
+  NO3_PARTS,
+  NO5_PARTS,
+  NO7_PARTS,
+  NO8_PARTS,
+  NO9_PARTS,
+  NO10_PARTS,
+} from '@/donutsParts.js';
 
-// One player behind every sketch's page, so moving between them never reloads.
-// A sketch plays to its end and flows into the next, wrapping round; the panel's
-// prev/next walk the same order (DonutsNo4 walks its parts first, via p.stepPart).
-// A change dips to black, swaps sketches at the bottom and opens on the new one,
-// with the address and title following. Each sketch has its own song and tempo
-// and loads it during the dip, so the join is a short gap, not on a bar line.
-// Capture renders the page's sketch only: it never plays, so it never moves on.
-// Sketches get p.lifetime (an AbortController, aborted when they go) for anything
-// outside p5 that has to stop with them, and may dispatch 'donuts:sketch-ended'
-// for an end of their own.
+// The Donuts series runs two players.
+//
+// The musical sketches (No1–No3, No5–No10) run on the lab suite: one host owns
+// audio, MIDI and the clock, so prev/next walk each sketch's reel parts and flow
+// into the next sketch on the part boundary, with no page reload. Each of those
+// modules exports `song`/`title`/`mount` for the host.
+//
+// No4 keeps its own stem transport and the three "coming soon" placeholders have
+// no audio, so neither can join the suite — they stay on the legacy player
+// (startLegacySeries) below, which dips to black and swaps sketches the way the
+// series always did. No4 walks its parts first (via p.stepPart).
 
-const SKETCHES = {
+const SUITE_PARTS = {
+  'number-1': NO1_PARTS,
+  'number-2': NO2_PARTS,
+  'number-3': NO3_PARTS,
+  'number-5': NO5_PARTS,
+  'number-7': NO7_PARTS,
+  'number-8': NO8_PARTS,
+  'number-9': NO9_PARTS,
+  'number-10': NO10_PARTS,
+};
+
+const SUITE_LOADERS = {
   'number-1': () => import('./DonutsNo1.js'),
   'number-2': () => import('./DonutsNo2.js'),
   'number-3': () => import('./DonutsNo3.js'),
-  'number-4': () => import('./DonutsNo4.js'),
   'number-5': () => import('./DonutsNo5.js'),
-  'number-6': () => import('./DonutsNo6.js'),
   'number-7': () => import('./DonutsNo7.js'),
   'number-8': () => import('./DonutsNo8.js'),
   'number-9': () => import('./DonutsNo9.js'),
   'number-10': () => import('./DonutsNo10.js'),
+};
+
+const SUITE_TRACKS = Object.keys(SUITE_LOADERS).flatMap((route) =>
+  Object.keys(SUITE_PARTS[route]).map((part) => ({
+    route,
+    part,
+    load: SUITE_LOADERS[route],
+  }))
+);
+
+const LEGACY_SKETCHES = {
+  'number-4': () => import('./DonutsNo4.js'),
+  'number-6': () => import('./DonutsNo6.js'),
   'number-11': () => import('./DonutsNo11.js'),
   'number-12': () => import('./DonutsNo12.js'),
 };
-const ROUTES = Object.keys(sketchMetadata);
+
+/**
+ * Start the Donuts series on `firstRoute`. Musical routes use the suite player;
+ * No4 and the placeholders use the legacy dip-to-black player.
+ */
+export const startSeries = (firstRoute) => {
+  if (SUITE_LOADERS[firstRoute]) return startSuiteSeries(firstRoute);
+  return startLegacySeries(firstRoute);
+};
+
+/** Lab suite host over No1–No3 and No5–No10. */
+const startSuiteSeries = () =>
+  createSuitePlayer({
+    tracks: SUITE_TRACKS,
+    engine: createSuiteEngine(),
+    base: import.meta.env.BASE_URL,
+  }).start();
+
+// ---------------------------------------------------------------------------
+// Legacy player for No4 (stem transport) and the placeholders. It only ever
+// mounts those routes, so it never touches the suite-sketch modules.
+// ---------------------------------------------------------------------------
+
+const LEGACY_ROUTES = Object.keys(LEGACY_SKETCHES);
 const WITH_PARTS = 'number-4';
 
 const FADE_OUT_MS = 250;
@@ -72,7 +130,7 @@ const unmount = (p) => {
   p.remove();
 };
 
-export const startSeries = (firstRoute) => {
+const startLegacySeries = (firstRoute) => {
   const fadeTo = createVeil();
   let route = firstRoute;
   let current = null;
@@ -92,7 +150,7 @@ export const startSeries = (firstRoute) => {
   };
 
   const mount = async (next, play) => {
-    const { default: sketch } = await SKETCHES[next]();
+    const { default: sketch } = await LEGACY_SKETCHES[next]();
     const p = new p5((instance) => {
       instance.lifetime = new AbortController();
       sketch(instance);
@@ -129,7 +187,7 @@ export const startSeries = (firstRoute) => {
     }
   };
 
-  const nextRoute = (step) => ROUTES[(ROUTES.indexOf(route) + step + ROUTES.length) % ROUTES.length];
+  const nextRoute = (step) => LEGACY_ROUTES[(LEGACY_ROUTES.indexOf(route) + step + LEGACY_ROUTES.length) % LEGACY_ROUTES.length];
 
   function press(step) {
     if (switching) {

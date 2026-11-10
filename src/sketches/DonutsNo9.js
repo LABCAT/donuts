@@ -1,8 +1,10 @@
 import '@lib/p5.audioReact.js';
 import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
+import { mountSketch } from '@labcat2020/p5.audioreactive/mount.js';
 import { drawLegacyDonut } from './functions/legacyShapes.js';
 import { resolveSeed } from './functions/legacySeed.js';
+import { NO9_BPM, NO9_PARTS } from '@/donutsParts.js';
 
 // Port of LABCAT/donuts-no-1: a bar-long ribbon of donuts, one per note, each
 // stamped 32 times around a circle. Shapes and tetradic colours are picked from
@@ -14,7 +16,10 @@ const audio = base + 'audio/DonutsNo9.ogg';
 const midi = base + 'audio/DonutsNo9.mid';
 const midiCue2 = base + 'audio/DonutsNo9-cue2.mid';
 
-const TEMPO = 90;
+export const title = '#DonutsNo9';
+export const song = { audio, midi, bpm: NO9_BPM, parts: NO9_PARTS };
+
+const TEMPO = NO9_BPM;
 const BAR_SECONDS = Math.floor((60 / TEMPO) * 4 * 100000) / 100000;
 const SHAPES = ['ellipse', 'rect', 'equilateral', 'hexagon', 'octagon'];
 const MIDI_LOW = 40;
@@ -24,8 +29,7 @@ const CUE1_FLAT_AT = 71;
 const CUE2_FLAT_AT = 36;
 const CUE2_TRIM_UNTIL = 50;
 
-const sketch = (p) => {
-  p.loopAudio = true;
+const sketch = (p, ctx) => {
   p.song = null;
   p.bpm = TEMPO;
   p.audioLoaded = false;
@@ -203,16 +207,21 @@ const sketch = (p) => {
   };
 
   p.setup = async () => {
-    const { signal } = p.lifetime;
-    window.addEventListener(
-      'labcat:playback',
-      (e) => {
-        if (!e.detail?.playing || p.isLooping()) return;
-        p.resetAnimation();
-        p.loop();
-      },
-      { signal }
-    );
+    const onPlayback = (e) => {
+      if (!e.detail?.playing || p.isLooping()) return;
+      p.resetAnimation();
+      p.loop();
+    };
+    const onKey = (e) => {
+      if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
+    };
+    if (p.listen) {
+      p.listen(window, 'labcat:playback', onPlayback);
+    } else {
+      const { signal } = p.lifetime;
+      window.addEventListener('labcat:playback', onPlayback, { signal });
+      p.onDestroy(() => window.removeEventListener('labcat:playback', onPlayback));
+    }
 
     p.pixelDensity(1);
     p.createCanvas(p.windowWidth, p.windowHeight);
@@ -225,13 +234,13 @@ const sketch = (p) => {
     const params = new URLSearchParams(window.location.search);
     if (!params.has('fps') || params.get('fps') !== '0') p.enableFpsIndicator();
     window.toggleFps = () => p.toggleFpsIndicator();
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-      },
-      { signal }
-    );
+    if (p.listen) {
+      p.listen(window, 'keydown', onKey);
+    } else {
+      const { signal } = p.lifetime;
+      window.addEventListener('keydown', onKey, { signal });
+      p.onDestroy(() => window.removeEventListener('keydown', onKey));
+    }
 
     initCapture(p, { prefix: 'DonutsNo9', enabled: false, captureCSSBackground: false });
 
@@ -241,17 +250,31 @@ const sketch = (p) => {
     p.bassShape = p.random(SHAPES);
 
     const cue2 = await p.loadMidi(midiCue2);
-    await p.loadSong(audio, midi, (result) => {
+    const onMidi = (result) => {
       const notes1 = result?.tracks?.[1]?.notes ?? [];
       const notes2 = cue2?.tracks?.[1]?.notes ?? cue2?.tracks?.[0]?.notes ?? [];
       p.scheduleCueSet(notes1, 'executeCueSet1', true);
       p.scheduleCueSet(notes2, 'executeCueSet2', true);
       p.buildPoster(notes1, notes2);
-    });
+    };
+    if (ctx) {
+      // A suite host owns the song, MIDI and clock.
+      p.attachSong(ctx.song, ctx.midi, onMidi);
+      p.useClock(ctx.clock, { host: true });
+    } else {
+      await p.loadSong(audio, midi, onMidi);
+      p.usePartPlayer({
+        parts: NO9_PARTS,
+        bpm: NO9_BPM,
+        part: params.get('part'),
+        seed: () => resolveSeed(),
+      });
+    }
   };
 
   p.draw = () => {
-    if (p.captureInProgress) p.showingStatic = false;
+    // A suite hand-off can start this sketch's clock before any play event.
+    if (p.showingStatic && (p._clock?.playing || p.captureInProgress)) p.showingStatic = false;
 
     if (p.showingStatic) {
       p.drawPoster();
@@ -304,5 +327,7 @@ const sketch = (p) => {
     if (p.showingStatic) p.redraw();
   };
 };
+
+export const mount = (container, ctx) => mountSketch(container, sketch, ctx);
 
 export default sketch;
