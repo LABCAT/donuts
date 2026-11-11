@@ -43,6 +43,9 @@ const { sketchInfo } = Astro.props;
     pathSegments[pathSegments.length - 1] ||
     pathSegments[pathSegments.length - 2];
 
+  // startSeries picks the player: the lab suite for the musical sketches
+  // (No1–No3, No5–No10), the legacy dip-to-black player for No4 and the
+  // placeholders.
   startSeries(sketchId)
     .then(() => {
       console.log('Sketch loaded successfully!');

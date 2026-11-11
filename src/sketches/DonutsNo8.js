@@ -1,7 +1,9 @@
 import '@lib/p5.audioReact.js';
 import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
+import { mountSketch } from '@labcat2020/p5.audioreactive/mount.js';
 import { resolveSeed } from './functions/legacySeed.js';
+import { NO8_BPM, NO8_PARTS } from '@/donutsParts.js';
 
 // Port of LABCAT/donuts-no-2: 25 precomputed "woven" ring fields. Each cue picks
 // the next group and reveals its recorded drawing calls in 16 steps across the
@@ -12,6 +14,9 @@ import { resolveSeed } from './functions/legacySeed.js';
 const base = import.meta.env.BASE_URL || './';
 const audio = base + 'audio/DonutsNo8.ogg';
 const midi = base + 'audio/DonutsNo8.mid';
+
+export const title = '#DonutsNo8';
+export const song = { audio, midi, bpm: NO8_BPM, parts: NO8_PARTS };
 
 const GROUP_COUNT = 25;
 const HUE_RANGES = {
@@ -26,10 +31,9 @@ const ROTATION_OPTIONS = [3, 4, 6, 8, 12];
 const ITERATION_OPTIONS = [16, 32, 48, 64];
 const REVEAL_CHUNKS = 16;
 
-const sketch = (p) => {
-  p.loopAudio = true;
+const sketch = (p, ctx) => {
   p.song = null;
-  p.bpm = 106;
+  p.bpm = NO8_BPM;
   p.audioLoaded = false;
   p.songHasFinished = false;
   p.showingStatic = true;
@@ -134,16 +138,21 @@ const sketch = (p) => {
   };
 
   p.setup = async () => {
-    const { signal } = p.lifetime;
-    window.addEventListener(
-      'labcat:playback',
-      (e) => {
-        if (!e.detail?.playing || p.isLooping()) return;
-        p.resetAnimation();
-        p.loop();
-      },
-      { signal }
-    );
+    const onPlayback = (e) => {
+      if (!e.detail?.playing || p.isLooping()) return;
+      p.resetAnimation();
+      p.loop();
+    };
+    const onKey = (e) => {
+      if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
+    };
+    if (p.listen) {
+      p.listen(window, 'labcat:playback', onPlayback);
+    } else {
+      const { signal } = p.lifetime;
+      window.addEventListener('labcat:playback', onPlayback, { signal });
+      p.onDestroy(() => window.removeEventListener('labcat:playback', onPlayback));
+    }
 
     p.createCanvas(p.windowWidth, p.windowHeight);
     p.colorMode(p.HSB, 360, 100, 100, 255);
@@ -155,27 +164,41 @@ const sketch = (p) => {
     const params = new URLSearchParams(window.location.search);
     if (!params.has('fps') || params.get('fps') !== '0') p.enableFpsIndicator();
     window.toggleFps = () => p.toggleFpsIndicator();
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-      },
-      { signal }
-    );
+    if (p.listen) {
+      p.listen(window, 'keydown', onKey);
+    } else {
+      const { signal } = p.lifetime;
+      window.addEventListener('keydown', onKey, { signal });
+      p.onDestroy(() => window.removeEventListener('keydown', onKey));
+    }
 
     initCapture(p, { prefix: 'DonutsNo8', enabled: false, captureCSSBackground: false });
 
     p.randomSeed(resolveSeed());
     p.loadDonutGroups();
 
-    await p.loadSong(audio, midi, (result) => {
+    const onMidi = (result) => {
       const notes = result?.tracks?.[1]?.notes ?? [];
       p.scheduleCueSet(notes, 'executeCueSet1');
-    });
+    };
+    if (ctx) {
+      // A suite host owns the song, MIDI and clock.
+      p.attachSong(ctx.song, ctx.midi, onMidi);
+      p.useClock(ctx.clock, { host: true });
+    } else {
+      await p.loadSong(audio, midi, onMidi);
+      p.usePartPlayer({
+        parts: NO8_PARTS,
+        bpm: NO8_BPM,
+        part: params.get('part'),
+        seed: () => resolveSeed(),
+      });
+    }
   };
 
   p.draw = () => {
-    if (p.captureInProgress) p.showingStatic = false;
+    // A suite hand-off can start this sketch's clock before any play event.
+    if (p.showingStatic && (p._clock?.playing || p.captureInProgress)) p.showingStatic = false;
 
     if (p.showingStatic) {
       p.drawPoster();
@@ -231,5 +254,7 @@ const sketch = (p) => {
     }
   };
 };
+
+export const mount = (container, ctx) => mountSketch(container, sketch, ctx);
 
 export default sketch;

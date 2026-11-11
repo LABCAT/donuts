@@ -1,6 +1,8 @@
 import '@lib/p5.audioReact.js';
 import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
+import { mountSketch } from '@labcat2020/p5.audioreactive/mount.js';
+import { NO10_BPM, NO10_PARTS } from '@/donutsParts.js';
 
 // Port of LABCAT/donuts-no-3: a grid of orbiting dots. Six cues step the hue
 // increment and halve/double the dot size, clearing the trails; between cues the
@@ -10,13 +12,15 @@ const base = import.meta.env.BASE_URL || './';
 const audio = base + 'audio/DonutsNo10.ogg';
 const midi = base + 'audio/DonutsNo10.mid';
 
-const TEMPO = 97;
+export const title = '#DonutsNo10';
+export const song = { audio, midi, bpm: NO10_BPM, parts: NO10_PARTS };
+
+const TEMPO = NO10_BPM;
 const EIGHTH_SECONDS = 60 / TEMPO / 8;
 const TIME_STEP = 0.225 / 8;
 const HUE_STEPS = [0, 5, 10, 15, 15, 10, 5];
 
-const sketch = (p) => {
-  p.loopAudio = true;
+const sketch = (p, ctx) => {
   p.song = null;
   p.bpm = TEMPO;
   p.audioLoaded = false;
@@ -61,16 +65,21 @@ const sketch = (p) => {
   };
 
   p.setup = async () => {
-    const { signal } = p.lifetime;
-    window.addEventListener(
-      'labcat:playback',
-      (e) => {
-        if (!e.detail?.playing || p.isLooping()) return;
-        p.resetAnimation();
-        p.loop();
-      },
-      { signal }
-    );
+    const onPlayback = (e) => {
+      if (!e.detail?.playing || p.isLooping()) return;
+      p.resetAnimation();
+      p.loop();
+    };
+    const onKey = (e) => {
+      if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
+    };
+    if (p.listen) {
+      p.listen(window, 'labcat:playback', onPlayback);
+    } else {
+      const { signal } = p.lifetime;
+      window.addEventListener('labcat:playback', onPlayback, { signal });
+      p.onDestroy(() => window.removeEventListener('labcat:playback', onPlayback));
+    }
 
     p.frameRate(30);
     p.createCanvas(p.windowWidth, p.windowHeight);
@@ -83,24 +92,38 @@ const sketch = (p) => {
     const params = new URLSearchParams(window.location.search);
     if (!params.has('fps') || params.get('fps') !== '0') p.enableFpsIndicator();
     window.toggleFps = () => p.toggleFpsIndicator();
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) p.toggleFpsIndicator();
-      },
-      { signal }
-    );
+    if (p.listen) {
+      p.listen(window, 'keydown', onKey);
+    } else {
+      const { signal } = p.lifetime;
+      window.addEventListener('keydown', onKey, { signal });
+      p.onDestroy(() => window.removeEventListener('keydown', onKey));
+    }
 
     initCapture(p, { prefix: 'DonutsNo10', enabled: false, captureCSSBackground: false });
 
-    await p.loadSong(audio, midi, (result) => {
+    const onMidi = (result) => {
       const notes = result?.tracks?.[1]?.notes ?? [];
       p.scheduleCueSet(notes, 'executeCueSet1');
-    });
+    };
+    if (ctx) {
+      // A suite host owns the song, MIDI and clock.
+      p.attachSong(ctx.song, ctx.midi, onMidi);
+      p.useClock(ctx.clock, { host: true });
+    } else {
+      await p.loadSong(audio, midi, onMidi);
+      p.usePartPlayer({
+        parts: NO10_PARTS,
+        bpm: NO10_BPM,
+        part: params.get('part'),
+        seed: () => Math.floor(Math.random() * 1e9),
+      });
+    }
   };
 
   p.draw = () => {
-    if (p.captureInProgress) p.showingStatic = false;
+    // A suite hand-off can start this sketch's clock before any play event.
+    if (p.showingStatic && (p._clock?.playing || p.captureInProgress)) p.showingStatic = false;
 
     if (p.showingStatic) {
       p.drawPoster();
@@ -142,5 +165,7 @@ const sketch = (p) => {
     if (p.showingStatic) p.redraw();
   };
 };
+
+export const mount = (container, ctx) => mountSketch(container, sketch, ctx);
 
 export default sketch;

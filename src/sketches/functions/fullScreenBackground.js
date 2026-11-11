@@ -105,10 +105,13 @@ export const randomizeFullScreenBg = (p) => {
 
 export const installFullScreenBg = (p, { overlayOpacity = 0.18, profile = 'base' } = {}) => {
   p.fullScreenProfile = profile;
+  // Keep the gradient inside this sketch's layer: a suite preload mounts the
+  // next sketch hidden, and it must not repaint the one on screen.
+  const root = p.container ?? document.body;
   // Clean up previous HMR wrappers — also purge old wrappers without data attr from before fix
-  document.querySelectorAll('[data-fullscreen-bg]').forEach((el) => el.remove());
+  root.querySelectorAll('[data-fullscreen-bg]').forEach((el) => el.remove());
   // Fallback: remove orphaned fixed inset wrappers left by earlier broken installs (stacked black)
-  document.querySelectorAll('body > div').forEach((el) => {
+  root.querySelectorAll(':scope > div').forEach((el) => {
     if (el === p?.bgWrapperEl) return;
     const s = el.style;
     if (s.position === 'fixed' && s.inset === '0px' && s.zIndex === '0' && el.children.length >= 2) {
@@ -129,7 +132,8 @@ export const installFullScreenBg = (p, { overlayOpacity = 0.18, profile = 'base'
 
   wrapper.appendChild(p.fullScreenGradientEl);
   wrapper.appendChild(p.fullScreenOverlayEl);
-  document.body.insertBefore(wrapper, document.body.firstChild);
+  root.insertBefore(wrapper, root.firstChild);
+  p.own?.(wrapper);
   p.bgWrapperEl = wrapper;
   p.fullScreenBgWrapperEl = wrapper;
   randomizeFullScreenBg(p);

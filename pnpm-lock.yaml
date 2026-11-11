@@ -12,14 +12,14 @@ importers:
   .:
     dependencies:
       '@labcat2020/animation-lab':
-        specifier: 0.2.3
-        version: 0.2.3(astro@6.4.8(rollup@4.63.4)(sass-embedded@1.105.0)(sass@1.105.0)(supports-color@8.1.1))(sass-embedded@1.105.0)
+        specifier: 0.3.0
+        version: 0.3.0(astro@6.4.8(rollup@4.63.4)(sass-embedded@1.105.0)(sass@1.105.0)(supports-color@8.1.1))(sass-embedded@1.105.0)
       '@labcat2020/p5.audioreactive':
-        specifier: ^0.2.0
-        version: 0.2.0(p5@2.2.3)(supports-color@8.1.1)
+        specifier: ^0.3.0
+        version: 0.3.0(p5@2.2.3)(supports-color@8.1.1)
       '@labcat2020/p5.audioreactive-capture':
-        specifier: ^0.1.4
-        version: 0.1.4(p5@2.2.3)
+        specifier: ^0.1.5
+        version: 0.1.5(p5@2.2.3)
       '@labcat2020/p5.polygon':
         specifier: 0.1.0
         version: 0.1.0(p5@2.2.3)
@@ -489,20 +489,20 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
-  '@labcat2020/animation-lab@0.2.3':
-    resolution: {integrity: sha512-fWFvR3dR0VoFHJaSGCoNCdshbYLSUSk6BytmhlkYJ717wJmEwx6pt2ML5MU0zDwn0sHnPaxmniRKx9ul0BqFxw==}
+  '@labcat2020/animation-lab@0.3.0':
+    resolution: {integrity: sha512-jVWCLlOZVILoFKUHMJzsFK8yE77McBa2gqcnENK7V71lFi0Ref6vyjILO4JDbT931RCJ2LyWdgrppbnn0lYmAA==}
     hasBin: true
     peerDependencies:
       astro: ^6.0.8
       sass-embedded: ^1.98.0
 
-  '@labcat2020/p5.audioreactive-capture@0.1.4':
-    resolution: {integrity: sha512-ov0N0m3/g7ZRsi1LjylX+4fw6kyhOV3SwwVGAw/QgT9w1uQX2w+OslGO1dTjoJYdB5zYLig9V0UfOH1cNdFk1w==}
+  '@labcat2020/p5.audioreactive-capture@0.1.5':
+    resolution: {integrity: sha512-Lln77pz+wAZGuFN8Ge8IEbSdk8qgGw6AMQLM5xFLyP0JyMKLhqs/PlkHCJF3TH4BRRvKKm2iZ2y6PJIRn9qUPA==}
     peerDependencies:
       p5: 2.2.3
 
-  '@labcat2020/p5.audioreactive@0.2.0':
-    resolution: {integrity: sha512-6rUP9iEOyHEFwGZ06jJkxhfZTMvtYwa/W1q6pmd/pNxyqCXyWFUW/Ef+Au/rIq87BFMwLPEE9NN2iYwu/A64Rw==}
+  '@labcat2020/p5.audioreactive@0.3.0':
+    resolution: {integrity: sha512-HDujTRQpHtjAnID55MiZd32CGvKSLOIAU5KalfU9q31o/5RGbtRH7uhod9RVaqLUhbf/vFUOenSW5+os2dEBmQ==}
     peerDependencies:
       p5: 2.2.3
 
@@ -2951,19 +2951,19 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@labcat2020/animation-lab@0.2.3(astro@6.4.8(rollup@4.63.4)(sass-embedded@1.105.0)(sass@1.105.0)(supports-color@8.1.1))(sass-embedded@1.105.0)':
+  '@labcat2020/animation-lab@0.3.0(astro@6.4.8(rollup@4.63.4)(sass-embedded@1.105.0)(sass@1.105.0)(supports-color@8.1.1))(sass-embedded@1.105.0)':
     dependencies:
       '@labcat2020/rocketship': 0.1.0
       astro: 6.4.8(rollup@4.63.4)(sass-embedded@1.105.0)(sass@1.105.0)(supports-color@8.1.1)
       normalize.css: 8.0.1
       sass-embedded: 1.105.0
 
-  '@labcat2020/p5.audioreactive-capture@0.1.4(p5@2.2.3)':
+  '@labcat2020/p5.audioreactive-capture@0.1.5(p5@2.2.3)':
     dependencies:
       jszip: 3.10.1
       p5: 2.2.3
 
-  '@labcat2020/p5.audioreactive@0.2.0(p5@2.2.3)(supports-color@8.1.1)':
+  '@labcat2020/p5.audioreactive@0.3.0(p5@2.2.3)(supports-color@8.1.1)':
     dependencies:
       '@tonejs/midi': 2.0.28
       p5: 2.2.3
