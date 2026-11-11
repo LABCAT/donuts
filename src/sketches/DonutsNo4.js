@@ -73,7 +73,11 @@ const BG_EVERY = 4; // frames between universe renders; the plate is slow and th
 const CLICK = 0.4; // seconds a note's click takes, or less to finish before the next note
 const STAB_MIN = 0.5; // seconds: a brass note this long is a stab (bursts the gold donuts); shorter ones are the run (rings in)
 const BRASS_RELEASE = 0.9; // seconds the gold donuts take to drift off after the stab ends
-const BRASS_GOLD = 44; // hue of the brass
+const BRASS_GOLD = 44; // hue of the brass in the 'gold' scheme
+// How the seed colours the brass: one metal (gold, or a mono hue off the look), a
+// triad across the crown's layers, a rainbow round it, or iridescent (each donut's
+// hue turns as it tumbles).
+const BRASS_SCHEMES = ['gold', 'mono', 'triadic', 'rainbow', 'iridescent'];
 // The crown: rings of gold donuts. length is how far out past the weave they fly
 // and size how big they are (of the half-axis); offset interleaves them (of their spacing).
 const CROWN_LAYERS = [
@@ -170,6 +174,7 @@ const sketch = (p) => {
   let bgColors = null;
   let bgTick = 0;
   let bgFlat = null;
+  let brass = { scheme: 'gold', hue: BRASS_GOLD };
   const kit = { kick: [], snare: [], hat: [] };
   const player = createStemPlayer(stems, `${base}audio/${MIX_FILE}`);
   let endFrom = 0; // seconds into the mix where the ending starts
@@ -205,6 +210,11 @@ const sketch = (p) => {
     seed = next;
     look = createWovenLook(seed);
     bgColors = universePalette(look.hues);
+    const scheme = BRASS_SCHEMES[Math.floor(hash(seed, 41) * BRASS_SCHEMES.length)];
+    brass = {
+      scheme,
+      hue: scheme === 'gold' ? BRASS_GOLD : (look.hues[1] + 120 + hash(seed, 43) * 120) % 360,
+    };
   }
 
   // ---------------------------------------------------------------- stems and parts
@@ -317,8 +327,10 @@ const sketch = (p) => {
   };
 
   p.setup = async () => {
-    p.pixelDensity(1);
     p.createCanvas(p.windowWidth, p.windowHeight);
+    // After createCanvas: p5 2.x sets the main canvas to ceil(devicePixelRatio) when it
+    // makes it, so a call before is lost and a 125%+ display draws 4× the pixels.
+    p.pixelDensity(1);
     p.canvas.classList.add('p5Canvas--cursor-play');
     p.canvas.style.position = 'fixed';
     p.canvas.style.top = '0';
@@ -362,6 +374,8 @@ const sketch = (p) => {
     );
     const flowTimer = setInterval(flowOn, ADVANCE_MS);
     signal.addEventListener('abort', () => clearInterval(flowTimer));
+    // The universe plate's canvas is moved in beside the sketch's, so take it out with it.
+    signal.addEventListener('abort', () => bgG?.canvas?.remove());
 
     try {
       const [data] = await Promise.all([p.loadMidi(midi), player.ready]);
@@ -517,7 +531,20 @@ const sketch = (p) => {
     }
   };
 
-  // The brass, in gold. The run's notes each fire a ring in from past the edge and
+  // The brass's hue for donut k of n in crown layer l (tilt -1..1 is how it's tumbled),
+  // by the seed's scheme.
+  const brassHue = (l, k, n, tilt) => {
+    const h = {
+      gold: brass.hue + CROWN_LAYERS[l].hue,
+      mono: brass.hue + l * 8,
+      triadic: brass.hue + l * 120,
+      rainbow: brass.hue + (360 * k) / n + l * 20,
+      iridescent: brass.hue + 140 * tilt + l * 30,
+    }[brass.scheme];
+    return ((h % 360) + 360) % 360;
+  };
+
+  // The brass, in the seed's colours. The run's notes each fire a ring in from past the edge and
   // they all land on the stab; the stab bursts a crown of gold donuts out of the
   // donut that ring while it's held, then drift off and fade.
   const drawBrass = (tm, length, dip) => {
@@ -558,7 +585,7 @@ const sketch = (p) => {
       ctx.setLineDash([arc * lerp(0.3, 0.75, x), arc * lerp(0.7, 0.25, x)]);
       ctx.lineDashOffset = (rank % 2 ? 1 : -1) * x * arc * 1.5;
       ctx.globalAlpha = dip * on * (0.35 + 0.65 * x) * lerp(0.6, 1, lift);
-      ctx.strokeStyle = `hsl(${BRASS_GOLD - 6 + 12 * lift}, 100%, ${58 + 30 * flash}%)`;
+      ctx.strokeStyle = `hsl(${brassHue(rank % CROWN_LAYERS.length, rank, run.length, lift * 2 - 1)}, 100%, ${58 + 30 * flash}%)`;
       ctx.lineWidth = half * (0.004 + 0.006 * lift) * (1 + 2.5 * flash);
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, TAU);
@@ -579,15 +606,15 @@ const sketch = (p) => {
       const a0 = -Math.PI / 2;
 
       const glow = ctx.createRadialGradient(0, 0, ring * 0.5, 0, 0, edge);
-      glow.addColorStop(0, `hsla(${BRASS_GOLD + 6}, 100%, 70%, 1)`);
-      glow.addColorStop(1, `hsla(${BRASS_GOLD - 10}, 100%, 40%, 0)`);
+      glow.addColorStop(0, `hsla(${(brass.hue + 6) % 360}, 100%, 70%, 1)`);
+      glow.addColorStop(1, `hsla(${(brass.hue + 350) % 360}, 100%, 40%, 0)`);
       ctx.globalAlpha = dip * on * 0.4 * decay(age, 0.14);
       ctx.fillStyle = glow;
       ctx.fillRect(-p.width / 2, -p.height / 2, p.width, p.height);
 
       const rays = CROWN_LAYERS[1].n;
       ctx.globalAlpha = dip * on * 0.55 * decay(age, 0.4);
-      ctx.strokeStyle = `hsl(${BRASS_GOLD + 8}, 100%, 80%)`;
+      ctx.strokeStyle = `hsl(${(brass.hue + 8) % 360}, 100%, 80%)`;
       ctx.lineWidth = half * 0.004;
       ctx.beginPath();
       for (let k = 0; k < rays; k++) {
@@ -603,17 +630,16 @@ const sketch = (p) => {
         const size = half * layer.size * open * vibrato;
         if (size < 1) return;
         const dist = ring * 1.02 + half * layer.length * open * vibrato + half * 0.5 * out * out;
-        const hue = BRASS_GOLD + layer.hue;
         for (const [alpha, weight, light] of [
           [0.2, 4, 55],
           [0.85, 1, 78],
         ]) {
           ctx.globalAlpha = dip * on * fade * alpha;
-          ctx.strokeStyle = `hsl(${hue}, 100%, ${light}%)`;
           ctx.lineWidth = half * 0.0035 * weight * (l ? 0.8 : 1.1);
           for (let k = 0; k < layer.n; k++) {
             const a = a0 + (TAU * (k + layer.offset)) / layer.n + layer.spin * age;
             const tilt = Math.cos(layer.tumble * age + k * 1.3);
+            ctx.strokeStyle = `hsl(${brassHue(l, k, layer.n, tilt)}, 100%, ${light}%)`;
             traceDonut(ctx, Math.cos(a) * dist, Math.sin(a) * dist, a, size, Math.max(0.12, Math.abs(tilt)));
             ctx.stroke();
           }
@@ -853,7 +879,7 @@ const sketch = (p) => {
       bgFlat.width = cw;
       bgFlat.height = ch;
     }
-    if (resized || bgTick % BG_EVERY === 0) {
+    if (resized || p.captureInProgress || bgTick % BG_EVERY === 0) {
       bgShader.setUniform('uRes', [w, h]);
       bgShader.setUniform('uT', t);
       bgShader.setUniform('uSeed', seed % 100000);
@@ -868,9 +894,29 @@ const sketch = (p) => {
       bgShader.setUniform('uSnare', drums.snare);
       bgShader.setUniform('uHat', drums.hat);
       bgG.filter(bgShader);
-      bgFlat.getContext('2d').drawImage(bgG.canvas, 0, 0, cw, ch);
+      if (p.captureInProgress) bgFlat.getContext('2d').drawImage(bgG.canvas, 0, 0, cw, ch);
     }
     bgTick++;
+    // Live, the plate's own canvas sits behind the sketch, stretched by CSS, so
+    // nothing is copied between canvases; capture reads only the sketch's canvas, so
+    // there the plate is drawn into it.
+    const layer = bgG.canvas;
+    if (!p.captureInProgress) {
+      if (layer.parentNode !== p.canvas.parentNode) p.canvas.parentNode.insertBefore(layer, p.canvas);
+      Object.assign(layer.style, {
+        display: 'block',
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        width: `${p.width}px`,
+        height: `${p.height}px`,
+        zIndex: '0',
+        pointerEvents: 'none',
+      });
+      p.clear();
+      return;
+    }
+    layer.style.display = 'none';
     const ctx = p.drawingContext;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
