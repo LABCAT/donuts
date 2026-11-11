@@ -3,19 +3,20 @@ import '@lib/p5.fps.js';
 import initCapture from '@labcat2020/p5.audioreactive-capture';
 import { createStemPlayer } from '@sketches/functions/stemPlayer.js';
 import '@labcat2020/p5.polygon';
-import { Donut } from './classes/Donut.js';
 import { createWovenLook, holeOf } from '@sketches/functions/wovenLook.js';
 import { createLoopSpectrum } from '@sketches/functions/loopSpectrum.js';
 import { DONUTS_UNIVERSE_FRAG, universePalette } from '@sketches/functions/donutsUniverse.js';
 import { BPM, END_FROM_BAR, LOOP_BARS, LOOP_FROM_BAR, MIX_FILE, PARTS, STEMS } from '@/audioTracks.js';
 
-// DonutsNo4 — a woven donut, test (Brass plays but has no visuals yet). Every stem
+// DonutsNo4 — a woven donut. Every stem
 // has its own material and place (ledger §5). Theme is the weave: each note flashes
 // it, clicks it round and steps its hue, every 2 bars it moves to its other state,
 // and muted it collapses to a few strands. Drums never touch it: the kick pumps a
 // thick ring in the hole, the snare fires a shockwave out from the hole across the
-// frame, the hats tick round the rim. Piano is an orbit of scribbled donuts as in
-// No1-3, each note lighting the next. Without a ?seed each part gets a new look,
+// frame, the hats tick round the rim. Piano paints an ensō per chord, a dry-brush
+// circle round the weave banded by the chord's notes, which float apart after. Brass is gold: its rising run fires rings in
+// from past the edge that all land on the downbeat, and the stab there bursts a
+// crown of gold donuts out of the donut. Without a ?seed each part gets a new look,
 // under a short dip.
 // The 4-bar stems play on a loop: each part (src/audioTracks.js) sets which stems
 // are on and flows into the next, gaplessly because the sources never stop, and
@@ -46,14 +47,31 @@ const HAT = [42];
 const MUTED_STRANDS = 2; // curves left of the weave when the theme is muted
 const SNARE_LIFE = 0.45; // seconds a shockwave takes to cross the frame
 const HAT_TRAIL = 4; // rim ticks still fading at once
-const ORBIT_RADIUS = 0.8; // of the short half-axis
-const ORBIT_SIZE = 0.2;
-const ORBIT_REF = 540; // stroke weights scale off this short half-axis, as in No3
+const ENSO_RADIUS = [0.86, 1.0]; // the piano's brush circles, of the short half-axis
+const ENSO_PAINT = 0.32; // seconds the brush takes at most; a shorter chord paints faster
+const ENSO_DRY = 2.2; // seconds the chord's voices take to float off after it ends
+const ENSO_FLOAT = 0.55; // of the short half-axis: how far the top voice floats out
+const ENSO_BRISTLES = 16;
+const ENSO_STEPS = 80; // points per bristle round a whole circle
 const STATE_BARS = 2; // bars between the weave's two states, within the 4-bar loop
 const FLOW = 2; // whole weave twists per loop, on top of the seeded twistTurns
 const FFT_RIPPLE = 0.07; // of the half-axis: how far No2's waveform bends the weave
-const BG_SCALE = 2; // the universe plate renders at half res, as in RectanglesNo2
+const STRUM = 0.04; // of the half-axis: how hard a note plucks the weave
+const ORBIT_SCALE = 0.5; // orbit diameter = this × the long axis
+const PART_LIGHT = [0.6, 0.72, 0.86, 0.95, 1.06, 1.14]; // universe brightness per part a-f
+const BG_SCALE = 4; // the universe plate renders at quarter res: it is soft and the fill is the cost
+const BG_EVERY = 4; // frames between universe renders; the plate is slow and the motion is gentle
 const CLICK = 0.1; // seconds a note's click takes
+const STAB_MIN = 0.5; // seconds: a brass note this long is a stab (bursts the gold donuts); shorter ones are the run (rings in)
+const BRASS_RELEASE = 0.9; // seconds the gold donuts take to drift off after the stab ends
+const BRASS_GOLD = 44; // hue of the brass
+// The crown: rings of gold donuts. length is how far out past the weave they fly
+// and size how big they are (of the half-axis); offset interleaves them (of their spacing).
+const CROWN_LAYERS = [
+  { n: 6, length: 0.8, size: 0.11, hue: 8, offset: 0.25, spin: 0.18, tumble: 3.1 },
+  { n: 12, length: 0.52, size: 0.065, hue: 0, offset: 0, spin: -0.12, tumble: -4.3 },
+  { n: 12, length: 0.3, size: 0.042, hue: -10, offset: 0.5, spin: 0.08, tumble: 5.2 },
+];
 const MAX_POINTS = 1200; // per curve, for the many-winding looks
 // Part changes dip to DIP_FLOOR, DIP_OUT before the bar line and back over DIP_IN.
 const DIP_OUT = 0.3;
@@ -72,6 +90,11 @@ const ease = (x) => {
   return c * c * (3 - 2 * c);
 };
 const lerp = (a, b, x) => a + (b - a) * x;
+// A fixed 0-1 value per pair, so brush texture is the same every pass and in capture.
+const hash = (a, b) => {
+  const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
 // A ring's radius at angle t: round, or a polygon with that many sides.
 const ringShape = (t, sides) => {
   if (!sides) return 1;
@@ -91,6 +114,17 @@ const lastOnset = (onsets, tm, length) => {
 // Unique start times of these notes, in seconds from the loop's first bar.
 const onsetsOf = (notes, fromSec) => [...new Set(notes.map((n) => n.time - fromSec))].sort((a, b) => a - b);
 
+// The longest note sounding at each onset, aligned with onsetsOf.
+const durationsOf = (notes, fromSec, ppq) => {
+  const byTime = new Map();
+  for (const note of notes) {
+    const time = note.time - fromSec;
+    const duration = note.duration ?? ((note.durationTicks ?? 0) / ppq) * (60 / BPM);
+    byTime.set(time, Math.max(byTime.get(time) ?? 0, duration));
+  }
+  return [...byTime.keys()].sort((a, b) => a - b).map((time) => byTime.get(time));
+};
+
 const sketch = (p) => {
   const params = new URLSearchParams(window.location.search);
   const randomSeed = () => Math.floor(Math.random() * 100000);
@@ -101,6 +135,9 @@ const sketch = (p) => {
   const beat = 60 / BPM;
   const snap = { beat, bar: beat * BEATS_PER_BAR }[params.get('snap')] ?? 0;
   const held = (name) => (params.get(name) ?? '').split(',');
+  const guides = params.get('guides') === '1';
+  const bgOn = params.get('bg') !== '0';
+  const orbitRadius = () => Math.max(p.width, p.height) * ORBIT_SCALE;
 
   // hold: true/false once the viewer has turned a stem on/off, null = the part decides.
   const stems = STEMS.map((s) => ({
@@ -111,15 +148,19 @@ const sketch = (p) => {
     shown: 0,
     notes: [],
     onsets: [],
+    durations: [],
+    chords: [],
   }));
   const themeStem = stems.find((s) => s.id === 'theme');
   const drumStem = stems.find((s) => s.id === 'drums');
   const pianoStem = stems.find((s) => s.id === 'piano');
-  let orbit = [];
+  const brassStem = stems.find((s) => s.id === 'brass');
   let spectrum = null;
   let bgG = null;
   let bgShader = null;
   let bgColors = null;
+  let bgTick = 0;
+  let bgFlat = null;
   const kit = { kick: [], snare: [], hat: [] };
   const player = createStemPlayer(stems, `${base}audio/${MIX_FILE}`);
   let endFrom = 0; // seconds into the mix where the ending starts
@@ -150,21 +191,11 @@ const sketch = (p) => {
     syncUrl();
   };
 
-  // The seed sets the look, and the shapes of the piano's donuts through p5's random.
-  // Reveal driven by hand, as in DonutsNo3: drawBirthTime stays null, so Donut draws
-  // floor(elements * drawProgress) outlines and never recomputes that.
+  // The seed sets the look.
   function applyLook(next) {
     seed = next;
     look = createWovenLook(seed);
     bgColors = universePalette(look.hues);
-    p.randomSeed(seed);
-    p.currentColorScheme = [p.color(0, 0, 100)];
-    orbit = Array.from({ length: look.orbit }, () => {
-      const d = new Donut(p, 1, 1, 0, 0, 1);
-      d.uniformColour = true;
-      d.drawProgressEnabled = true;
-      return d;
-    });
   }
 
   // ---------------------------------------------------------------- stems and parts
@@ -214,6 +245,17 @@ const sketch = (p) => {
       if (other === s) scheduleStem(s, snap ? Math.ceil(now / snap) * snap : now);
       else scheduleStem(other);
     }
+    queueEnding();
+    announcePart();
+  };
+
+  // M: mute every stem at once, or put them back as the current part has them.
+  const toggleAllStems = () => {
+    const now = player.time();
+    if (isInEnding(now - partStart)) return;
+    const allOff = stems.every((s) => !(s.hold ?? partHasStem(s, PARTS[partIndex], now - partStart)));
+    for (const s of stems) s.hold = allOff ? null : false;
+    for (const s of stems) scheduleStem(s);
     queueEnding();
     announcePart();
   };
@@ -293,6 +335,7 @@ const sketch = (p) => {
         const stem = stems[Number(e.key) - 1];
         if (stem) toggleStem(stem);
         const key = e.key.toLowerCase();
+        if (key === 'm') toggleAllStems();
         if (key === 'f') p.toggleFpsIndicator();
         if (key === 'n') setSeed(seed + 1);
         if (key === 'p') setSeed(Math.max(1, seed - 1));
@@ -321,7 +364,12 @@ const sketch = (p) => {
       for (const s of stems) {
         s.notes = data.tracks[s.track].notes.filter((n) => n.ticks >= from && n.ticks < to);
         s.onsets = onsetsOf(s.notes, fromSec);
+        s.durations = durationsOf(s.notes, fromSec, data.header.ppq);
       }
+      // Each piano chord's notes, low to high: they band and colour its ensō.
+      pianoStem.chords = pianoStem.onsets.map((o) =>
+        [...new Set(pianoStem.notes.filter((n) => n.time - fromSec === o).map((n) => n.midi))].sort((a, b) => a - b)
+      );
       kit.kick = onsetsOf(drumStem.notes.filter((n) => KICK.includes(n.midi)), fromSec);
       kit.snare = onsetsOf(drumStem.notes.filter((n) => SNARE.includes(n.midi)), fromSec);
       kit.hat = onsetsOf(drumStem.notes.filter((n) => HAT.includes(n.midi)), fromSec);
@@ -364,32 +412,206 @@ const sketch = (p) => {
     s.shown = p.captureInProgress ? target : s.shown + (target - s.shown) * (1 - Math.exp(-dt * MUTE_RATE));
   };
 
-  // The piano: small scribbled donuts round the ring, turning once per loop, each
-  // note lighting the next one. Muted, they're gone.
+  // The piano: each chord paints an ensō, a Zen brush circle, round the weave. The
+  // brush lands heavy where the chord's root sits on the clock (A, F, G and E each
+  // have their place), sweeps round in one stroke as far as the chord is long, and
+  // runs dry as it goes: each bristle runs out of ink at its own point and the tail
+  // breaks up. The brush is banded by the chord's notes, low inside to high outside,
+  // each coloured by its place on the circle of fifths (turned by the look's hue), so
+  // the harmony shows. After the chord its voices float apart out into the universe,
+  // the top note furthest, and fade. Muted, gone.
   const drawPiano = (tm, length, dip) => {
     const on = pianoStem.shown;
-    if (on < 0.01 || !length) return;
-    const note = lastOnset(pianoStem.onsets, tm, length);
-    const count = pianoStem.onsets.length;
+    const onsets = pianoStem.onsets;
+    if (on < 0.01 || !length || !onsets.length) return;
     const half = Math.min(p.width, p.height) * 0.5;
-    orbit.forEach((d, i) => {
-      const angle = TAU * (i / orbit.length + (look.orbitTurns * tm) / length);
-      d.x = p.width / 2 + Math.cos(angle) * half * ORBIT_RADIUS;
-      d.y = p.height / 2 + Math.sin(angle) * half * ORBIT_RADIUS;
-      // This donut's last note: the latest whose number lands on it.
-      let lit = 0;
-      for (let k = 0; k < orbit.length && count; k++) {
-        const n = (note.index - k + count) % count;
-        if (n % orbit.length !== i) continue;
-        lit = decay((tm - pianoStem.onsets[n] + length) % length, 0.3);
+    const ctx = p.drawingContext;
+    ctx.save();
+    ctx.translate(p.width / 2, p.height / 2);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    onsets.forEach((o, i) => {
+      const held = pianoStem.durations[i] ?? 0.2;
+      const age = (tm - o + length) % length;
+      if (age >= held + ENSO_DRY) return;
+      const chord = pianoStem.chords[i]?.length ? pianoStem.chords[i] : [45];
+      const pc = ((chord[0] % 12) + 12) % 12;
+      const long = Math.min(1, Math.max(0, (held - 0.15) / 0.85));
+      const start = -Math.PI / 2 + (TAU * pc) / 12 + (hash(i, 1) - 0.5) * 0.5;
+      const sweep = TAU * lerp(0.42, 0.9, long);
+      const x = Math.min(1, age / Math.min(ENSO_PAINT, held));
+      const reach = 1 - Math.pow(1 - x, 3);
+      const dry = age > held ? ease((age - held) / ENSO_DRY) : 0;
+      const r = half * lerp(ENSO_RADIUS[0], ENSO_RADIUS[1], hash(i, 2));
+      const width = half * lerp(0.045, 0.09, long);
+      const fresh = decay(age, 0.1);
+      const voices = chord.map((midi, v) => {
+        const fifths = ((((midi % 12) * 7) % 12) + 12) % 12;
+        const up = chord.length > 1 ? v / (chord.length - 1) : 1;
+        return {
+          colour: `hsl(${(look.hues[0] + fifths * 30) % 360}, ${lerp(90, 70, dry)}%, ${lerp(50, 66, up) + 22 * fresh}%)`,
+          lift: half * ENSO_FLOAT * dry * lerp(0.2, 1, up) * lerp(0.8, 1.2, hash(i, v + 11)),
+          turn: dry * 0.35 * (up - 0.5) * (hash(i, 5) < 0.5 ? 1 : -1),
+        };
+      });
+      ctx.globalCompositeOperation = 'lighter';
+      const steps = Math.max(2, Math.ceil(ENSO_STEPS * reach * (sweep / TAU)));
+      for (let b = 0; b < ENSO_BRISTLES; b++) {
+        const side = (b / (ENSO_BRISTLES - 1)) * 2 - 1;
+        const voice = voices[Math.min(voices.length - 1, Math.floor((b / ENSO_BRISTLES) * voices.length))];
+        ctx.strokeStyle = voice.colour;
+        const dryAt = lerp(0.5, 1, hash(i * 31 + b, 3));
+        ctx.lineWidth = (width / ENSO_BRISTLES) * 1.7 * lerp(0.6, 1.4, hash(b, i + 7));
+        ctx.globalAlpha = dip * on * (1 - dry) * lerp(0.55, 1, hash(b, i));
+        ctx.beginPath();
+        let pen = false;
+        for (let k = 0; k <= steps; k++) {
+          const u = (reach * k) / steps;
+          // Past its dry point a bristle skips more and more of the stroke.
+          const thin = Math.max(0, (u - dryAt) / (1 - dryAt + 1e-3)) * 0.9 + 0.03;
+          if (hash(i * 97 + b, Math.floor(u * 48)) < thin) {
+            pen = false;
+            continue;
+          }
+          // A heavy landing that tapers to a point at the tail.
+          const press = Math.sqrt(Math.min(1, u / 0.06)) * (1 - 0.65 * Math.pow(u, 2.5)) * (u < 0.05 ? 1 + 0.6 * (1 - u / 0.05) : 1);
+          const a = start + sweep * u + voice.turn;
+          const rr = r * (1 + 0.025 * Math.sin(3 * a + i)) + side * width * 0.5 * press + voice.lift;
+          const px = Math.cos(a) * rr;
+          const py = Math.sin(a) * rr;
+          if (pen) ctx.lineTo(px, py);
+          else ctx.moveTo(px, py);
+          pen = true;
+        }
+        ctx.stroke();
+      }
+    });
+    ctx.restore();
+  };
+
+  // A gold donut seen in 3D: a ring of tube cross-sections round a centre at (x, y),
+  // tipped by tilt (1 = face on, 0 = edge on) and turned to angle a.
+  const traceDonut = (ctx, x, y, a, size, tilt) => {
+    const tubes = 16;
+    const tube = size * 0.36;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    ctx.beginPath();
+    for (let k = 0; k < tubes; k++) {
+      const t = (TAU * k) / tubes;
+      const u = Math.cos(t) * size;
+      const v = Math.sin(t) * size * tilt;
+      const cx = x + u * ca - v * sa;
+      const cy = y + u * sa + v * ca;
+      ctx.moveTo(cx + tube, cy);
+      ctx.arc(cx, cy, tube, 0, TAU);
+    }
+  };
+
+  // The brass, in gold. The run's notes each fire a ring in from past the edge and
+  // they all land on the stab; the stab bursts a crown of gold donuts out of the
+  // donut that ring while it's held, then drift off and fade.
+  const drawBrass = (tm, length, dip) => {
+    const on = brassStem.shown;
+    const onsets = brassStem.onsets;
+    if (on < 0.01 || !length || !onsets.length) return;
+    const durs = brassStem.durations;
+    const isStab = (i) => (durs[i] ?? 0) >= STAB_MIN;
+    const since = (o) => (tm - o + length) % length;
+    const half = Math.min(p.width, p.height) * 0.5;
+    const ring = half * look.radius;
+    const edge = Math.hypot(p.width, p.height) * 0.5;
+    const ctx = p.drawingContext;
+    ctx.save();
+    ctx.translate(p.width / 2, p.height / 2);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // The run: rings falling in, faster as they near, each note one more.
+    const run = onsets.map((o, i) => i).filter((i) => !isStab(i));
+    run.forEach((i, rank) => {
+      let travel = 0;
+      for (let k = 1; k <= onsets.length; k++) {
+        const n = (i + k) % onsets.length;
+        if (!isStab(n)) continue;
+        travel = (onsets[n] - onsets[i] + length) % length || length;
         break;
       }
-      d.size = half * ORBIT_SIZE * (1 + 0.5 * lit);
-      d.strokeWeight = (half / ORBIT_REF) * (1 + lit);
-      d.drawProgress = lerp(0.08, 1, lit);
-      d.drawElements[0].colour = p.color(look.hues[1] % 360, 85, lerp(50, 100, lit), dip * on);
-      d.draw();
+      const age = since(onsets[i]);
+      if (!travel || age >= travel) return;
+      const x = age / travel;
+      const lift = run.length > 1 ? rank / (run.length - 1) : 1;
+      const r = lerp(edge * 1.04, ring, x * x);
+      const flash = decay(age, 0.07);
+      const dashes = 6 + rank * 2;
+      const arc = (TAU * r) / dashes;
+      ctx.setLineDash([arc * lerp(0.3, 0.75, x), arc * lerp(0.7, 0.25, x)]);
+      ctx.lineDashOffset = (rank % 2 ? 1 : -1) * x * arc * 1.5;
+      ctx.globalAlpha = dip * on * (0.35 + 0.65 * x) * lerp(0.6, 1, lift);
+      ctx.strokeStyle = `hsl(${BRASS_GOLD - 6 + 12 * lift}, 100%, ${58 + 30 * flash}%)`;
+      ctx.lineWidth = half * (0.004 + 0.006 * lift) * (1 + 2.5 * flash);
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.stroke();
     });
+    ctx.setLineDash([]);
+
+    // The stab: the flash, the rays, the crown.
+    onsets.forEach((o, i) => {
+      if (!isStab(i)) return;
+      const age = since(o);
+      const held = durs[i];
+      if (age >= held + BRASS_RELEASE) return;
+      const open = ease(age / 0.14) * (1 + 0.14 * jelly(age, 0.3, 0.24));
+      const out = age > held ? ease((age - held) / BRASS_RELEASE) : 0;
+      const fade = 1 - out;
+      const vibrato = 1 + 0.035 * Math.sin(TAU * 5.5 * age) * ease(age / 0.3);
+      const a0 = -Math.PI / 2;
+
+      const glow = ctx.createRadialGradient(0, 0, ring * 0.5, 0, 0, edge);
+      glow.addColorStop(0, `hsla(${BRASS_GOLD + 6}, 100%, 70%, 1)`);
+      glow.addColorStop(1, `hsla(${BRASS_GOLD - 10}, 100%, 40%, 0)`);
+      ctx.globalAlpha = dip * on * 0.4 * decay(age, 0.14);
+      ctx.fillStyle = glow;
+      ctx.fillRect(-p.width / 2, -p.height / 2, p.width, p.height);
+
+      const rays = CROWN_LAYERS[1].n;
+      ctx.globalAlpha = dip * on * 0.55 * decay(age, 0.4);
+      ctx.strokeStyle = `hsl(${BRASS_GOLD + 8}, 100%, 80%)`;
+      ctx.lineWidth = half * 0.004;
+      ctx.beginPath();
+      for (let k = 0; k < rays; k++) {
+        const a = a0 + (TAU * (k + 0.5)) / rays + 0.06 * age;
+        const from = ring * 1.1;
+        const to = lerp(from, edge * 1.05, ease(age / 0.22));
+        ctx.moveTo(Math.cos(a) * from, Math.sin(a) * from);
+        ctx.lineTo(Math.cos(a) * to, Math.sin(a) * to);
+      }
+      ctx.stroke();
+
+      CROWN_LAYERS.forEach((layer, l) => {
+        const size = half * layer.size * open * vibrato;
+        if (size < 1) return;
+        const dist = ring * 1.02 + half * layer.length * open * vibrato + half * 0.5 * out * out;
+        const hue = BRASS_GOLD + layer.hue;
+        for (const [alpha, weight, light] of [
+          [0.2, 4, 55],
+          [0.85, 1, 78],
+        ]) {
+          ctx.globalAlpha = dip * on * fade * alpha;
+          ctx.strokeStyle = `hsl(${hue}, 100%, ${light}%)`;
+          ctx.lineWidth = half * 0.0035 * weight * (l ? 0.8 : 1.1);
+          for (let k = 0; k < layer.n; k++) {
+            const a = a0 + (TAU * (k + layer.offset)) / layer.n + layer.spin * age;
+            const tilt = Math.cos(layer.tumble * age + k * 1.3);
+            traceDonut(ctx, Math.cos(a) * dist, Math.sin(a) * dist, a, size, Math.max(0.12, Math.abs(tilt)));
+            ctx.stroke();
+          }
+        }
+      });
+    });
+    ctx.restore();
   };
 
   // The drums, none of it touching the weave: a ring in the hole on the kick, a
@@ -447,6 +669,16 @@ const sketch = (p) => {
     const note = lastOnset(themeStem.onsets, tm, length);
     const flash = decay(note.since, 0.15) * themeStem.shown;
     const noteCount = Math.max(1, themeStem.onsets.length);
+    let strumAmp = 0;
+    if (themeStem.onsets.length) {
+      const plucks = Math.min(4, themeStem.onsets.length);
+      for (let k = 0; k < plucks; k++) {
+        const idx = (note.index - k + noteCount) % noteCount;
+        const since = (tm - themeStem.onsets[idx] + length) % length;
+        strumAmp += Math.exp(-since / 0.26) * Math.sin(since * 42 + k * 1.6);
+      }
+    }
+    const strumOrigin = (TAU * note.index) / noteCount;
 
     // Two states of the weave, moved between over a beat after each change.
     const stateAt = beat * BEATS_PER_BAR * STATE_BARS;
@@ -490,7 +722,8 @@ const sketch = (p) => {
       for (let j = 0; j < points; j++) {
         const t = (j / points) * TAU * look.winds;
         const ripple = wave ? wave[Math.floor((j / points) * wave.length)] : 0;
-        const r = u * Math.max(MIN_RADIUS, ring * ringShape(t, look.sides) + sway * Math.cos(bend * t + twist) + FFT_RIPPLE * ripple * themeStem.shown);
+        const strum = STRUM * themeStem.shown * strumAmp * Math.sin(6 * (t - strumOrigin) + offset * 2.0);
+        const r = u * Math.max(MIN_RADIUS, ring * ringShape(t, look.sides) + sway * Math.cos(bend * t + twist) + strum + FFT_RIPPLE * ripple * themeStem.shown);
         const angle = t + wobble * Math.sin(bend * t - twist);
         const x = r * Math.cos(angle);
         const y = r * Math.sin(angle);
@@ -503,35 +736,75 @@ const sketch = (p) => {
     ctx.restore();
   };
 
+  const drawGuides = () => {
+    const ctx = p.drawingContext;
+    const cx = p.width / 2;
+    const cy = p.height / 2;
+    const outer = orbitRadius();
+    const inner = Math.min(p.width, p.height) * 0.5 * ENSO_RADIUS[1];
+    const hero = Math.min(p.width, p.height) * 0.5 * look.radius;
+    ctx.save();
+    ctx.setLineDash(guides ? [10, 8] : []);
+    ctx.lineWidth = guides ? 1.5 : 1;
+    ctx.strokeStyle = guides ? 'rgba(255, 255, 255, 0.55)' : 'rgba(255, 255, 255, 0.05)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, outer, 0, TAU);
+    ctx.stroke();
+    if (guides) {
+      ctx.strokeStyle = 'rgba(120, 230, 255, 0.65)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, inner, 0, TAU);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 90, 190, 0.45)';
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, hero, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+
   const paintUniverse = (t, dip, fft, drums) => {
     if (!bgColors) return;
     const w = Math.max(2, Math.ceil(p.width / BG_SCALE));
     const h = Math.max(2, Math.ceil(p.height / BG_SCALE));
-    if (!bgG || bgG.width !== w || bgG.height !== h) {
+    // bgFlat is blitted with an identity transform, so it must match the canvas's backing pixels, not p.width/height (CSS px)
+    const cw = p.canvas.width;
+    const ch = p.canvas.height;
+    const resized =
+      !bgG || bgG.width !== w || bgG.height !== h || bgFlat.width !== cw || bgFlat.height !== ch;
+    if (resized) {
       bgG?.remove?.();
       bgG = p.createGraphics(w, h, p.WEBGL);
       bgG.pixelDensity(1);
       bgShader = bgG.createFilterShader(DONUTS_UNIVERSE_FRAG);
+      bgFlat = document.createElement('canvas');
+      bgFlat.width = cw;
+      bgFlat.height = ch;
     }
-    bgShader.setUniform('uRes', [w, h]);
-    bgShader.setUniform('uT', t);
-    bgShader.setUniform('uSeed', seed % 100000);
-    bgShader.setUniform('uC0', bgColors[0]);
-    bgShader.setUniform('uC1', bgColors[1]);
-    bgShader.setUniform('uC2', bgColors[2]);
-    bgShader.setUniform('uDim', dip);
-    bgShader.setUniform('uBass', fft?.bass ?? 0);
-    bgShader.setUniform('uMid', fft?.mid ?? 0);
-    bgShader.setUniform('uHigh', fft?.high ?? 0);
-    bgShader.setUniform('uKick', drums.kick);
-    bgShader.setUniform('uSnare', drums.snare);
-    bgShader.setUniform('uHat', drums.hat);
-    bgG.filter(bgShader);
-    p.push();
-    p.noStroke();
-    p.imageMode(p.CORNER);
-    p.image(bgG, 0, 0, p.width, p.height);
-    p.pop();
+    if (resized || bgTick % BG_EVERY === 0) {
+      bgShader.setUniform('uRes', [w, h]);
+      bgShader.setUniform('uT', t);
+      bgShader.setUniform('uSeed', seed % 100000);
+      bgShader.setUniform('uC0', bgColors[0]);
+      bgShader.setUniform('uC1', bgColors[1]);
+      bgShader.setUniform('uC2', bgColors[2]);
+      bgShader.setUniform('uDim', dip);
+      bgShader.setUniform('uBass', fft?.bass ?? 0);
+      bgShader.setUniform('uMid', fft?.mid ?? 0);
+      bgShader.setUniform('uHigh', fft?.high ?? 0);
+      bgShader.setUniform('uKick', drums.kick);
+      bgShader.setUniform('uSnare', drums.snare);
+      bgShader.setUniform('uHat', drums.hat);
+      bgG.filter(bgShader);
+      bgFlat.getContext('2d').drawImage(bgG.canvas, 0, 0, cw, ch);
+    }
+    bgTick++;
+    const ctx = p.drawingContext;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(bgFlat, 0, 0);
+    ctx.restore();
   };
 
   p.draw = () => {
@@ -552,10 +825,14 @@ const sketch = (p) => {
       snare: drumStem.shown * decay(lastOnset(kit.snare, tm, length).since, 0.24),
       hat: drumStem.shown * decay(lastOnset(kit.hat, tm, length).since, 0.07),
     };
-    paintUniverse(t, dip, fft, drums);
+    const universeDim = dip * (PART_LIGHT[partIndex] ?? 1);
+    if (bgOn) paintUniverse(t, universeDim, fft, drums);
+    else p.background(0);
     drawPiano(tm, length, dip);
+    drawBrass(tm, length, dip);
     drawWeave(tm, length, dip);
     drawDrums(tm, length, dip);
+    drawGuides();
   };
 
   p.windowResized = () => p.resizeCanvas(p.windowWidth, p.windowHeight);

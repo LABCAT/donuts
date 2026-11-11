@@ -121,6 +121,21 @@ void main() {
   float flare = smoothstep(0.34, 0.0, length(uv - fp)) * uSnare;
   col += mix(uC2, vec3(1.0), 0.3) * flare * 0.35 * well;
 
+  float ax = uv.x;
+  float wob = 0.035 * sin(ax * 4.0 + t * 1.6) + 0.018 * sin(ax * 9.0 - t * 2.1);
+  float topD = uv.y - (0.31 + wob);
+  float top2D = uv.y - (0.15 + wob * 1.3);
+  float botD = uv.y + (0.35 + wob * 0.8);
+  float curtainTop = exp(-(topD * topD) / 0.018);
+  float curtain2 = exp(-(top2D * top2D) / 0.013);
+  float curtainBot = exp(-(botD * botD) / 0.022);
+  float streak = 0.55 + 0.45 * sin(ax * 26.0 + 3.0 * sin(ax * 6.0 + t) + uT * 0.9);
+  vec3 aur = mix(vec3(0.10, 0.95, 0.55), vec3(0.65, 0.25, 0.95), 0.5 + 0.5 * sin(ax * 4.0 + t * 0.7));
+  aur = mix(aur, uC2, 0.15);
+  float aurora = (curtainTop + curtain2 * 0.6 + curtainBot * 0.5) * (0.45 + 0.55 * streak);
+  aurora *= 1.0 + 0.18 * uHigh * sin(uT * 22.0 + ax * 40.0) + 0.25 * uHat;
+  col += aur * aurora * (0.14 + 0.40 * uBass + 0.32 * uHigh) * well;
+
   col = col / (1.0 + col * 0.35);
   col *= 1.0 - 0.18 * dot(uv, uv);
   col *= uDim;
