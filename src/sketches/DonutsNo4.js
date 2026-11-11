@@ -9,14 +9,17 @@ import { DONUTS_UNIVERSE_FRAG, universePalette } from '@sketches/functions/donut
 import { BPM, END_FROM_BAR, LOOP_BARS, LOOP_FROM_BAR, MIX_FILE, PARTS, STEMS } from '@/audioTracks.js';
 
 // DonutsNo4 — a woven donut. Every stem
-// has its own material and place (ledger §5). Theme is the weave: each note flashes
-// it, clicks it round and steps its hue, every 2 bars it moves to its other state,
-// and muted it collapses to a few strands. Drums never touch it: the kick pumps a
-// thick ring in the hole, the snare fires a shockwave out from the hole across the
-// frame, the hats tick round the rim. Piano paints an ensō per chord, a dry-brush
-// circle round the weave banded by the chord's notes, which float apart after. Brass is gold: its rising run fires rings in
-// from past the edge that all land on the downbeat, and the stab there bursts a
-// crown of gold donuts out of the donut. Without a ?seed each part gets a new look,
+// has its own material and place (ledger §5). Theme is the weave: each note plucks
+// it like a string, a wave running both ways round from where it lands, flashes it,
+// eases it round and steps its hue; it swells with the smoothed spectrum, every 2
+// bars it moves to its other state, and muted it collapses to a few strands. Drums
+// never touch it: the kick blooms a spiral donut out of the hole (as in No5), the
+// snare sweeps a big one out across the frame, the hats flick small ones round the
+// rim. Piano paints an ensō per chord, a dry-brush circle round the weave banded by
+// the chord's notes, which float apart after. Brass is gold: its rising run fires
+// rings in from past the edge that all land on the downbeat, and the stab there
+// bursts a crown of gold donuts out of the donut. Without a ?seed each part gets a
+// new look,
 // under a short dip.
 // The 4-bar stems play on a loop: each part (src/audioTracks.js) sets which stems
 // are on and flows into the next, gaplessly because the sources never stop, and
@@ -45,7 +48,9 @@ const KICK = [36];
 const SNARE = [37, 38, 39];
 const HAT = [42];
 const MUTED_STRANDS = 2; // curves left of the weave when the theme is muted
-const SNARE_LIFE = 0.45; // seconds a shockwave takes to cross the frame
+const SNARE_LIFE = 0.9; // seconds the snare's spiral donut takes to sweep out across the frame
+const KICK_LIFE = 0.7; // seconds the kick's spiral donut blooms and fades
+const HAT_LIFE = 0.3; // seconds a hat's small spiral donut lasts
 const HAT_TRAIL = 4; // rim ticks still fading at once
 const ENSO_RADIUS = [0.86, 1.0]; // the piano's brush circles, of the short half-axis
 const ENSO_PAINT = 0.32; // seconds the brush takes at most; a shorter chord paints faster
@@ -55,13 +60,17 @@ const ENSO_BRISTLES = 16;
 const ENSO_STEPS = 80; // points per bristle round a whole circle
 const STATE_BARS = 2; // bars between the weave's two states, within the 4-bar loop
 const FLOW = 2; // whole weave twists per loop, on top of the seeded twistTurns
-const FFT_RIPPLE = 0.07; // of the half-axis: how far No2's waveform bends the weave
-const STRUM = 0.04; // of the half-axis: how hard a note plucks the weave
+const FFT_RIPPLE = 0.05; // of the half-axis: how far the spectrum's smooth swells bend the weave
+const STRUM = 0.075; // of the half-axis: how hard a note plucks the weave
+const STRUM_DECAY = 0.7; // seconds a pluck rings for
+const STRUM_SPEED = TAU * 2.4; // phase per second of a pluck's wave as it runs round the ring
+const STRUM_WAVES = 4; // crests per radian-ish along the ring: how tight a pluck's wave is
+const FFT_SMOOTH = 0.16; // seconds of spectrum averaged for the weave, so it swells rather than shakes
 const ORBIT_SCALE = 0.5; // orbit diameter = this × the long axis
 const PART_LIGHT = [0.6, 0.72, 0.86, 0.95, 1.06, 1.14]; // universe brightness per part a-f
 const BG_SCALE = 4; // the universe plate renders at quarter res: it is soft and the fill is the cost
 const BG_EVERY = 4; // frames between universe renders; the plate is slow and the motion is gentle
-const CLICK = 0.1; // seconds a note's click takes
+const CLICK = 0.4; // seconds a note's click takes, or less to finish before the next note
 const STAB_MIN = 0.5; // seconds: a brass note this long is a stab (bursts the gold donuts); shorter ones are the run (rings in)
 const BRASS_RELEASE = 0.9; // seconds the gold donuts take to drift off after the stab ends
 const BRASS_GOLD = 44; // hue of the brass
@@ -614,71 +623,128 @@ const sketch = (p) => {
     ctx.restore();
   };
 
-  // The drums, none of it touching the weave: a ring in the hole on the kick, a
-  // shockwave out from the hole on the snare, ticks round the rim on the hats.
+  // One of No5's spiral donuts: a shape (sides 0 = circle) stamped round the centre
+  // 2 × rotations times, each at offset from it, all in one path.
+  const traceRosette = (ctx, sides, size, offset, rotations, turn = 0) => {
+    const r = size / 2;
+    ctx.beginPath();
+    for (let i = 0; i < rotations * 2; i++) {
+      const a = turn + (Math.PI * i) / rotations;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      // The shape's centre is (0, offset) turned by a.
+      const cx = -offset * sa;
+      const cy = offset * ca;
+      if (!sides) {
+        ctx.moveTo(cx + r, cy);
+        ctx.arc(cx, cy, r, 0, TAU);
+        continue;
+      }
+      for (let k = 0; k <= sides; k++) {
+        const v = a + TAU * (k / sides) + Math.PI / sides;
+        const x = cx + Math.cos(v) * r;
+        const y = cy + Math.sin(v) * r;
+        if (k) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+      }
+    }
+    ctx.stroke();
+  };
+
+  // The drums as No5's spiral donuts, none of it touching the weave: the kick blooms
+  // one out of the hole, the snare sweeps a big one out across the frame, the hats
+  // flick small ones round the rim. The seed picks each one's shape, and a triadic
+  // set of hues off the look colours them, as in No5.
   const drawDrums = (tm, length, dip) => {
     const on = drumStem.shown;
     if (on < 0.01 || !length) return;
     const half = Math.min(p.width, p.height) * 0.5;
     const hole = half * holeOf(look);
     const hue = (look.hues[0] + 180) % 360;
+    const shapes = [0, 3, 4, 5, 6, 8];
+    const kickSides = shapes[seed % 6];
+    const snareSides = shapes[(seed + 1 + (Math.floor(seed / 6) % 5)) % 6];
+    const hatSides = shapes[(seed + 3) % 6];
     const ctx = p.drawingContext;
     ctx.save();
     ctx.translate(p.width / 2, p.height / 2);
     ctx.globalCompositeOperation = 'lighter';
-    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(0.8, half * 0.0018);
+    const recent = (onsets, count, life, draw) => {
+      if (!onsets.length) return;
+      const last = lastOnset(onsets, tm, length);
+      for (let k = 0; k < Math.min(count, onsets.length); k++) {
+        const n = (last.index - k + onsets.length) % onsets.length;
+        const age = (tm - onsets[n] + length) % length;
+        if (age < life) draw(age / life, age, onsets[n]);
+      }
+    };
 
-    const kick = lastOnset(kit.kick, tm, length);
-    const hit = jelly(kick.since, 0.16, 0.5);
-    ctx.globalAlpha = dip * on * lerp(0.2, 1, Math.max(0, hit));
-    ctx.strokeStyle = `hsl(${hue}, 90%, 60%)`;
-    ctx.lineWidth = hole * 0.3;
-    ctx.beginPath();
-    ctx.arc(0, 0, hole * lerp(0.35, 0.8, Math.max(0, hit)), 0, TAU);
-    ctx.stroke();
+    recent(kit.kick, 3, KICK_LIFE, (x, age) => {
+      const size = lerp(hole * 0.25, hole * 1.7, 1 - (1 - x) * (1 - x));
+      ctx.globalAlpha = dip * on * Math.pow(1 - x, 1.5) * (0.55 + 0.45 * decay(age, 0.05));
+      ctx.strokeStyle = `hsl(${hue}, 100%, ${55 + 25 * decay(age, 0.06)}%)`;
+      traceRosette(ctx, kickSides, size, size * 0.3, 24, x * 0.5);
+    });
 
-    const snare = lastOnset(kit.snare, tm, length);
-    const life = snare.since / SNARE_LIFE;
-    if (life < 1) {
-      ctx.globalAlpha = dip * on * (1 - life) * (1 - life);
-      ctx.strokeStyle = `hsl(${hue}, 35%, 85%)`;
-      ctx.lineWidth = half * 0.05 * (1 - life) + 1;
-      ctx.beginPath();
-      ctx.arc(0, 0, lerp(hole, half * 1.6, 1 - Math.pow(1 - life, 3)), 0, TAU);
-      ctx.stroke();
-    }
+    recent(kit.snare, 2, SNARE_LIFE, (x, age) => {
+      const size = lerp(hole, half * 2.2, 1 - Math.pow(1 - x, 3));
+      ctx.globalAlpha = dip * on * (1 - x) * (1 - x) * 0.8;
+      ctx.strokeStyle = `hsl(${(hue + 120) % 360}, 100%, ${60 + 20 * decay(age, 0.05)}%)`;
+      traceRosette(ctx, snareSides, size, size * 0.18, 24, -x * 0.4);
+    });
 
-    const hat = lastOnset(kit.hat, tm, length);
-    ctx.strokeStyle = `hsl(${hue}, 60%, 75%)`;
-    ctx.lineWidth = half * 0.012;
-    for (let k = 0; k < HAT_TRAIL && kit.hat.length; k++) {
-      const onset = kit.hat[(hat.index - k + kit.hat.length) % kit.hat.length];
+    recent(kit.hat, HAT_TRAIL, HAT_LIFE, (x, age, onset) => {
       const angle = (TAU * onset) / length - Math.PI / 2;
-      ctx.globalAlpha = dip * on * decay((tm - onset + length) % length, 0.12);
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(angle) * half * 0.93, Math.sin(angle) * half * 0.93);
-      ctx.lineTo(Math.cos(angle) * half * 0.99, Math.sin(angle) * half * 0.99);
-      ctx.stroke();
-    }
+      const size = half * 0.06 * (1 + x);
+      ctx.globalAlpha = dip * on * (1 - x) * (1 - x);
+      ctx.strokeStyle = `hsl(${(hue + 240) % 360}, 100%, 70%)`;
+      ctx.save();
+      ctx.translate(Math.cos(angle) * half * 0.94, Math.sin(angle) * half * 0.94);
+      traceRosette(ctx, hatSides, size, size * 0.3, 12, x);
+      ctx.restore();
+    });
     ctx.restore();
+  };
+
+  // The spectrum averaged over the last FFT_SMOOTH seconds (weighted to now), so the
+  // weave swells with the music instead of stepping with each spectrum frame.
+  const smoothSpectrum = (tm) => {
+    if (!spectrum) return null;
+    const out = { bass: 0, mid: 0, high: 0 };
+    let total = 0;
+    for (let k = 0; k < 8; k++) {
+      const w = 8 - k;
+      const f = spectrum.at(tm - (FFT_SMOOTH * k) / 8);
+      out.bass += f.bass * w;
+      out.mid += f.mid * w;
+      out.high += f.high * w;
+      total += w;
+    }
+    out.bass /= total;
+    out.mid /= total;
+    out.high /= total;
+    return out;
   };
 
   // The weave: closed curves, each a ring with a petal wobble, its twist shifted
   // by its place in the weave.
   const drawWeave = (tm, length, dip) => {
     const note = lastOnset(themeStem.onsets, tm, length);
-    const flash = decay(note.since, 0.15) * themeStem.shown;
+    const flash = decay(note.since, 0.25) * ease(note.since / 0.03) * themeStem.shown;
     const noteCount = Math.max(1, themeStem.onsets.length);
-    let strumAmp = 0;
-    if (themeStem.onsets.length) {
-      const plucks = Math.min(4, themeStem.onsets.length);
-      for (let k = 0; k < plucks; k++) {
-        const idx = (note.index - k + noteCount) % noteCount;
-        const since = (tm - themeStem.onsets[idx] + length) % length;
-        strumAmp += Math.exp(-since / 0.26) * Math.sin(since * 42 + k * 1.6);
-      }
+    // The last few notes as plucks: each sends a wave both ways round the ring from
+    // where it lands, running out and dying away like a string.
+    const plucks = [];
+    for (let k = 0; k < Math.min(4, themeStem.onsets.length); k++) {
+      const idx = (note.index - k + noteCount) % noteCount;
+      const since = (tm - themeStem.onsets[idx] + length) % length;
+      const amp = decay(since, STRUM_DECAY) * ease(since / 0.04);
+      if (amp > 0.01) plucks.push({ origin: (TAU * idx) / noteCount, since, amp });
     }
-    const strumOrigin = (TAU * note.index) / noteCount;
+    const nextOnset = themeStem.onsets.length ? themeStem.onsets[(note.index + 1) % noteCount] : 0;
+    const gap = themeStem.onsets.length ? (nextOnset - themeStem.onsets[note.index] + length) % length || length : CLICK;
 
     // Two states of the weave, moved between over a beat after each change.
     const stateAt = beat * BEATS_PER_BAR * STATE_BARS;
@@ -689,17 +755,16 @@ const sketch = (p) => {
     const phase = length ? tm / length : 0;
     const half = Math.min(p.width, p.height) * 0.5;
     const u = half;
-    const fft = spectrum ? spectrum.at(tm) : null;
+    const fft = smoothSpectrum(tm);
     const bass = fft ? fft.bass * themeStem.shown : 0;
     const mid = fft ? fft.mid * themeStem.shown : 0;
     const high = fft ? fft.high * themeStem.shown : 0;
-    const wave = spectrum ? spectrum.wave(tm) : null;
     const sway = swing * (1 + 0.9 * bass);
     const wobble = look.wobble * (1 + 0.7 * mid);
     const shift = TAU * look.twistTurns * FLOW * phase;
     // Whole circles per loop, a step per note, so they stay seamless.
     const hueStep = (360 * note.index) / noteCount;
-    const click = (TAU * look.clickTurns * (note.index + ease(note.since / CLICK))) / noteCount;
+    const click = (TAU * look.clickTurns * (note.index + ease(note.since / Math.min(CLICK, gap)))) / noteCount;
     const strands = Math.max(1, Math.round(lerp(Math.min(MUTED_STRANDS, look.strands), look.strands, themeStem.shown)));
     const points = Math.min(MAX_POINTS, (120 + look.petals * 24) * look.winds);
 
@@ -721,8 +786,14 @@ const sketch = (p) => {
       ctx.beginPath();
       for (let j = 0; j < points; j++) {
         const t = (j / points) * TAU * look.winds;
-        const ripple = wave ? wave[Math.floor((j / points) * wave.length)] : 0;
-        const strum = STRUM * themeStem.shown * strumAmp * Math.sin(6 * (t - strumOrigin) + offset * 2.0);
+        const ripple = Math.sin(2 * t + TAU * phase * 2) * bass * 0.6 + Math.sin(3 * t - TAU * phase * 3) * mid * 0.5 + Math.sin(5 * t + TAU * phase * 4 + offset) * high * 0.35;
+        let strum = 0;
+        for (const pl of plucks) {
+          let d = (((t - pl.origin) % TAU) + TAU) % TAU;
+          if (d > Math.PI) d = TAU - d;
+          strum += pl.amp * Math.exp(-d * 0.35) * Math.sin(STRUM_WAVES * d - STRUM_SPEED * pl.since + offset * 1.2);
+        }
+        strum *= STRUM * themeStem.shown * (1 + 0.8 * mid);
         const r = u * Math.max(MIN_RADIUS, ring * ringShape(t, look.sides) + sway * Math.cos(bend * t + twist) + strum + FFT_RIPPLE * ripple * themeStem.shown);
         const angle = t + wobble * Math.sin(bend * t - twist);
         const x = r * Math.cos(angle);
