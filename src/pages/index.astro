@@ -1,20 +1,14 @@
 ---
 import BaseLayout from '@labcat2020/animation-lab/layouts/BaseLayout.astro';
+import SiteHeader from '@labcat2020/animation-lab/components/SiteHeader.astro';
+import SeriesHome from '@labcat2020/animation-lab/components/SeriesHome.astro';
 import { getAllSketches } from '@/sketchMetadata.js';
-import config from '@/project.config.js';
 
 const sketches = getAllSketches();
+const tagline = 'A funk-powered torus belt. Audio-reactive donut animations.';
 ---
 
-<BaseLayout title="Donuts" description="Creative coding experiments." gtmId={config.gtmId}>
-  <h1>Donuts</h1>
-  <p>Creative coding experiments.</p>
-  <h2>Available sketches</h2>
-  <ul>
-    {sketches.map((sketch) => (
-      <li>
-        <a href={`/${sketch.id}/`}>{sketch.title}</a>
-      </li>
-    ))}
-  </ul>
+<BaseLayout title="Donuts | LABCAT Animations" description="Donuts: audio-reactive donut animations by LABCAT.">
+  <SiteHeader slot="header" collapsible={false} />
+  <SeriesHome name="Donuts" tagline={tagline} sketches={sketches} planet="donuts" accentA="#0cdbf5" accentB="#ff0cb8" />
 </BaseLayout>
